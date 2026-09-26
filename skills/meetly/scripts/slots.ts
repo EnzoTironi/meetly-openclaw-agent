@@ -1,6 +1,8 @@
 // Free times to offer: the owner's days and window, in the owner's zone,
 // clear of busy time, at least MIN_NOTICE_MIN ahead, spread across days.
 // The label and weekday come from here so the agent never computes a weekday.
+// With a locale (the other person's, e.g. pt-BR or en-US) the label follows
+// that locale's date and time conventions; without one it is "tue 29/9 12:00".
 import { parseArgs } from "node:util";
 import { isMain, readInput, run } from "./cli.ts";
 import { loadConfig, MIN_NOTICE_MIN, minutes, parseTime, SLOT_COUNT, STEP_MIN, type Config } from "./config.ts";
@@ -24,11 +26,24 @@ export type SlotQuery = {
   exclude?: string[];
   count?: number;
   ownerOverride?: boolean;
+  locale?: string;
 };
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-function label(ms: number, tz: string): string {
+// Throws on a malformed locale tag, so the CLI fails instead of guessing.
+export function localeFormatter(locale: string, tz: string): Intl.DateTimeFormat {
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      timeZone: tz, weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    throw new Error(`unknown locale: ${locale} (use a tag like pt-BR or en-US)`);
+  }
+}
+
+function label(ms: number, tz: string, format?: Intl.DateTimeFormat): string {
+  if (format) return format.format(new Date(ms));
   const p = wallParts(ms, tz);
   return `${p.weekday} ${p.d}/${p.m} ${pad(p.hh)}:${pad(p.mm)}`;
 }
@@ -91,11 +106,12 @@ export function findSlots(q: SlotQuery): { slots: Slot[]; unknownAfter?: string 
   }
   picked.sort((a, b) => a.start - b.start);
 
+  const format = q.locale !== undefined ? localeFormatter(q.locale, tz) : undefined;
   const slots = picked.map((c) => ({
     start: localIso(c.start, tz),
     end: localIso(c.end, tz),
     dayOfWeek: c.day,
-    label: label(c.start, tz),
+    label: label(c.start, tz, format),
   }));
   return q.unknownAfter !== undefined ? { slots, unknownAfter: q.unknownAfter } : { slots };
 }
@@ -126,6 +142,7 @@ if (isMain(import.meta.url)) {
         count: { type: "string" },
         owner: { type: "boolean" },
         now: { type: "string" },
+        locale: { type: "string" },
       },
     });
     const config = loadConfig();
@@ -153,6 +170,7 @@ if (isMain(import.meta.url)) {
     if (values.from !== undefined) q.from = date(values.from, "--from");
     if (values.to !== undefined) q.to = date(values.to, "--to");
     if (values["allow-overlap"]) q.allowOverlap = values["allow-overlap"];
+    if (values.locale !== undefined) q.locale = values.locale;
     if (values.exclude) {
       for (const e of values.exclude) if (Number.isNaN(Date.parse(e))) throw new Error(`--exclude is not a time: ${e}`);
       q.exclude = values.exclude;

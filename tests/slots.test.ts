@@ -93,6 +93,14 @@ test("daylight saving ends: 09:00 stays 09:00 local", () => {
   ]);
 });
 
+test("labels follow the other person's locale", () => {
+  assert.deepEqual(labels({ locale: "pt-BR" }), ["seg., 28/09, 10:00", "ter., 29/09, 09:00", "qua., 30/09, 09:00"]);
+  assert.deepEqual(labels({ locale: "en-US", count: 1 }), ["Mon, 9/28, 10:00 AM"]);
+  assert.deepEqual(labels({ locale: "de-DE", count: 1 }), ["Mo., 28.9., 10:00"]);
+  assert.equal(findSlots(q({ locale: "en-US" })).slots[0]!.dayOfWeek, "mon");
+  assert.throws(() => findSlots(q({ locale: "not a locale!" })), /unknown locale/);
+});
+
 test("the CLI reads busy.ts output and the stored config", () => {
   const home = tmpHome();
   writeJson(join(home, "config.json"), CONFIG);
@@ -111,6 +119,9 @@ test("the CLI reads busy.ts output and the stored config", () => {
   assert.deepEqual(allowed.json.slots.map((s: { label: string }) => s.label), ["mon 28/9 10:00"]);
   const owner = cli("slots.ts", ["--in", busyFile, ...now, "--days", "sat", "--owner", "--duration", "60"], env);
   assert.equal(owner.json.slots[0].end, "2026-10-03T10:00:00-03:00");
+  const us = cli("slots.ts", ["--in", busyFile, ...now, "--locale", "en-US", "--count", "1"], env);
+  assert.deepEqual(us.json.slots.map((s: { label: string }) => s.label), ["Mon, 9/28, 11:00 AM"]);
+  assert.equal(cli("slots.ts", ["--in", busyFile, "--locale", "??"], env).status, 1);
   assert.equal(cli("slots.ts", ["--in", busyFile, "--days", "someday"], env).status, 1);
   assert.equal(cli("slots.ts", ["--in", busyFile, "--from", "5/10"], env).status, 1);
 });
