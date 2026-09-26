@@ -1,0 +1,126 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  addRequest, cleanupList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest,
+  type Ledger, type NewRequest,
+} from "../skills/meetly/scripts/ledger.ts";
+import { cli, tmpHome } from "./helpers.ts";
+
+const T0 = Date.parse("2026-09-28T12:00:00Z");
+const HOUR = 3600_000;
+const offer = { start: "2026-09-29T12:00:00-03:00", end: "2026-09-29T12:30:00-03:00", holdId: "h1", account: "jean@example.com" };
+const input = (over: Record<string, unknown> = {}) => ({
+  origin: "inbound", handle: "+15551234567", topic: "coffee", durationMin: 30, offered: [offer], ...over,
+}) as NewRequest;
+const empty = (): Ledger => ({ requests: [] });
+
+test("handles normalize phones and emails", () => {
+  assert.equal(normalizeHandle("+1 (555) 123-4567"), "+15551234567");
+  assert.equal(normalizeHandle("(555) 123-4567"), "5551234567");
+  assert.equal(normalizeHandle(" Ana@Example.COM "), "ana@example.com");
+  assert.ok(sameHandle("+1 (555) 123-4567", "5551234567"));
+  assert.ok(sameHandle("+15551234567", "(555) 123-4567"));
+  assert.ok(sameHandle("ANA@example.com", "ana@EXAMPLE.com"));
+  assert.ok(!sameHandle("+15551234567", "+15551234568"));
+  assert.ok(!sameHandle("4567", "+15551234567"));
+  assert.ok(!sameHandle("ana@example.com", "+15551234567"));
+});
+
+test("the same person written three ways matches one request", () => {
+  const l = addRequest(empty(), input({ handle: "+1 (555) 123-4567" }), T0, "r_1");
+  for (const h of ["+15551234567", "5551234567", "(555) 123-4567"]) assert.equal(findOpenByHandle(l, h)?.id, "r_1");
+  const e = addRequest(empty(), input({ handle: "Ana@Example.com" }), T0, "r_2");
+  assert.equal(findOpenByHandle(e, "ana@example.com")?.id, "r_2");
+});
+
+test("add sets status and times, and validates", () => {
+  const l = addRequest(empty(), input(), T0, "r_1");
+  const r = l.requests[0]!;
+  assert.equal(r.status, "offered");
+  assert.equal(r.offeredAt, new Date(T0).toISOString());
+  assert.equal(r.createdAt, r.updatedAt);
+  assert.throws(() => addRequest(empty(), input({ origin: "email" }), T0, "x"));
+  assert.throws(() => addRequest(empty(), input({ handle: "" }), T0, "x"));
+  assert.throws(() => addRequest(empty(), input({ topic: " " }), T0, "x"));
+  assert.throws(() => addRequest(empty(), input({ durationMin: 0 }), T0, "x"));
+  assert.throws(() => addRequest(empty(), input({ offered: [] }), T0, "x"));
+  assert.throws(() => addRequest(empty(), input({ offered: [{ ...offer, start: "soon" }] }), T0, "x"));
+  assert.throws(() => addRequest(empty(), input({ offered: [{ ...offer, account: "" }] }), T0, "x"));
+});
+
+test("a second open request for the same person is refused until the first closes", () => {
+  let l = addRequest(empty(), input(), T0, "r_1");
+  assert.throws(() => addRequest(l, input({ handle: "5551234567", origin: "owner" }), T0, "r_2"), /open request r_1 already exists/);
+  l = updateRequest(l, "r_1", { status: "booked", eventId: "e1" }, T0);
+  l = addRequest(l, input(), T0, "r_2");
+  assert.equal(findOpenByHandle(l, "+15551234567")?.id, "r_2");
+});
+
+test("find by chat returns any status", () => {
+  let l = addRequest(empty(), input({ chatUid: "c1" }), T0, "r_1");
+  l = updateRequest(l, "r_1", { status: "booked" }, T0);
+  assert.equal(findByChat(l, "c1")?.id, "r_1");
+  assert.equal(findByChat(l, "c2"), undefined);
+  assert.equal(findOpenByHandle(l, "+15551234567"), undefined);
+});
+
+test("update resets offeredAt with new offers and rejects unknown keys", () => {
+  let l = addRequest(empty(), input(), T0, "r_1");
+  l = updateRequest(l, "r_1", { chatUid: "c1" }, T0 + HOUR);
+  assert.equal(l.requests[0]!.offeredAt, new Date(T0).toISOString());
+  assert.equal(l.requests[0]!.updatedAt, new Date(T0 + HOUR).toISOString());
+  l = updateRequest(l, "r_1", { offered: [{ ...offer, holdId: "h9" }] }, T0 + 2 * HOUR);
+  assert.equal(l.requests[0]!.offeredAt, new Date(T0 + 2 * HOUR).toISOString());
+  assert.throws(() => updateRequest(l, "r_1", { handle: "x" } as never, T0), /unknown key/);
+  assert.throws(() => updateRequest(l, "r_1", { status: "lost" } as never, T0), /status/);
+  assert.throws(() => updateRequest(l, "nope", { status: "dropped" }, T0), /no request/);
+});
+
+test("expired: 48 hours after the offer, open requests only", () => {
+  let l = addRequest(empty(), input(), T0, "r_1");
+  l = addRequest(l, input({ handle: "+15559999999" }), T0, "r_2");
+  l = updateRequest(l, "r_2", { status: "booked" }, T0);
+  assert.deepEqual(expiredRequests(l, 48, T0 + 47 * HOUR), []);
+  assert.deepEqual(expiredRequests(l, 48, T0 + 48 * HOUR).map((r) => r.id), ["r_1"]);
+});
+
+test("cleanup lists only requests with pending hold deletes", () => {
+  let l = addRequest(empty(), input(), T0, "r_1");
+  l = addRequest(l, input({ handle: "+15559999999" }), T0, "r_2");
+  l = updateRequest(l, "r_2", { holdCleanup: [{ holdId: "h7", account: "jean@example.com" }], status: "expired" }, T0);
+  l = updateRequest(l, "r_1", { holdCleanup: [] }, T0);
+  assert.deepEqual(cleanupList(l).map((r) => r.id), ["r_2"]);
+});
+
+test("CLI add, find, update, expired and cleanup round-trip", () => {
+  const home = tmpHome();
+  const env = { MEETLY_HOME: home };
+  const added = cli("ledger.ts", ["add", "--json", JSON.stringify(input({ handle: "+1 (555) 123-4567" }))], env);
+  assert.equal(added.status, 0, added.stderr);
+  const id = added.json.request.id;
+  assert.match(id, /^r_[0-9a-f]{8}$/);
+  assert.equal(cli("ledger.ts", ["find", "--handle", "5551234567"], env).json.request.id, id);
+  assert.deepEqual(cli("ledger.ts", ["find", "--handle", "+15550000000"], env).json, { request: null });
+  const patch = join(home, "patch.json");
+  writeFileSync(patch, JSON.stringify({ chatUid: "chat_1" }));
+  assert.equal(cli("ledger.ts", ["update", "--id", id, "--json-file", patch], env).json.request.chatUid, "chat_1");
+  assert.equal(cli("ledger.ts", ["find", "--chat", "chat_1"], env).json.request.id, id);
+  assert.deepEqual(cli("ledger.ts", ["expired"], env).json, { requests: [] });
+  assert.equal(cli("ledger.ts", ["expired", "--hours", "0"], env).json.requests.length, 1);
+  assert.deepEqual(cli("ledger.ts", ["cleanup"], env).json, { requests: [] });
+  cli("ledger.ts", ["update", "--id", id, "--json", '{"holdCleanup":[{"holdId":"h1","account":"a"}]}'], env);
+  assert.deepEqual(cli("ledger.ts", ["cleanup"], env).json, { requests: [{ id, holdCleanup: [{ holdId: "h1", account: "a" }] }] });
+  const dup = cli("ledger.ts", ["add", "--json", JSON.stringify(input())], env);
+  assert.equal(dup.status, 1);
+  assert.match(dup.stderr, /already exists/);
+});
+
+test("a corrupt ledger.json fails loudly", () => {
+  const home = tmpHome();
+  writeFileSync(join(home, "ledger.json"), "[oops");
+  const r = cli("ledger.ts", ["find", "--handle", "+15551234567"], { MEETLY_HOME: home });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /ledger\.json/);
+});
