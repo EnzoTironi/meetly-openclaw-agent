@@ -16,7 +16,11 @@ Source: `plow-openclaw-agent` @ `1e73c82`, `plugin/index.ts`.
   inbound Plow messages. `message send` also works outside a turn: `send()`
   does not need one, and target `plow-owner` resolves the owner's DM.
 
-Options:
+**Decision (owner, 2026-09-26): option 1.** The poll opens groups with
+`skills/meetly/scripts/start-thread.ts`. Turns started by a Plow message
+keep using `plow_start_thread`.
+
+Options considered:
 
 1. **Script that calls the API `plow_start_thread` uses.** Add a
    `start-thread.ts` that does the same call:
@@ -35,5 +39,8 @@ Options:
    `plow-openclaw-agent`). This is outside this repo; the no-fork rule
    applies.
 
-Still to confirm in [LOCAL] L1 §3 whatever is chosen: the tools a cron turn
+Still to confirm in [LOCAL] L1 §3: the tools a cron turn
 can see, and whether `exec` gets `PLOW_API_BASE`/`PLOW_AGENT_TOKEN`.
+- `start-thread.ts` from a cron turn: the group opens with the owner and the
+  phone, `trusted: true`, and a retry with the same `--key` does not open a
+  second group.
