@@ -224,4 +224,4 @@ Pick a newer `base-<sha>` tag and its digest from the
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+MIT. See [LICENSE](LICENSE).
