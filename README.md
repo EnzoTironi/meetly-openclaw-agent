@@ -221,3 +221,7 @@ Pick a newer `base-<sha>` tag and its digest from the
 4. Re-read the base's `plugin/index.ts` for `plow_start_thread`:
    `start-thread.ts` mirrors its `POST /v1/chats`.
 5. Run `npm test`.
+
+## License
+
+MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
