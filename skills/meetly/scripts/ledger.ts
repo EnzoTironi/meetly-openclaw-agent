@@ -12,6 +12,9 @@ import { readJson, updateJson } from "./store.ts";
 export type Status = "offered" | "booked" | "dropped" | "expired";
 export type Offer = { start: string; end: string; holdId?: string; account: string };
 export type HoldRef = { holdId: string; account: string };
+// A time outside the owner's days or window that the other person asked for,
+// waiting for the owner's yes or no.
+export type PendingOwner = { start: string; end: string; askedAt: string };
 export type Constraints = { days?: string[]; after?: string; before?: string; from?: string; to?: string };
 
 export type Request = {
@@ -30,6 +33,7 @@ export type Request = {
   status: Status;
   eventId?: string;
   holdCleanup?: HoldRef[];
+  pendingOwner?: PendingOwner;
   offeredAt: string;
   createdAt: string;
   updatedAt: string;
@@ -37,12 +41,16 @@ export type Request = {
 
 export type Ledger = { requests: Request[] };
 
-export type NewRequest = Omit<Request, "id" | "status" | "eventId" | "holdCleanup" | "offeredAt" | "createdAt" | "updatedAt">;
+export type NewRequest = Omit<Request, "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "offeredAt" | "createdAt" | "updatedAt">;
 export type Patch = Partial<Pick<Request,
-  "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic">>;
+  "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic">> & {
+  pendingOwner?: PendingOwner | null;
+};
 
 const STATUSES: readonly Status[] = ["offered", "booked", "dropped", "expired"];
-const PATCH_KEYS = ["status", "chatUid", "eventId", "offered", "holdCleanup", "name", "location", "allowOverlap", "constraints", "topic"];
+const PATCH_KEYS = [
+  "status", "chatUid", "eventId", "offered", "holdCleanup", "name", "location", "allowOverlap", "constraints", "topic", "pendingOwner",
+];
 
 const isEmail = (h: string) => h.includes("@");
 
@@ -104,10 +112,19 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
   }
   if (patch.status !== undefined && !STATUSES.includes(patch.status)) throw new Error(`bad status: ${patch.status}`);
   if (patch.offered !== undefined) checkOffers(patch.offered);
+  const pending = patch.pendingOwner;
+  if (pending) {
+    if ([pending.start, pending.end, pending.askedAt].some((t) => typeof t !== "string" || Number.isNaN(Date.parse(t)))) {
+      throw new Error(`pendingOwner needs valid start, end and askedAt: ${JSON.stringify(pending)}`);
+    }
+  }
   const index = ledger.requests.findIndex((r) => r.id === id);
   if (index < 0) throw new Error(`no request ${id}`);
   const at = new Date(now).toISOString();
-  const updated: Request = { ...ledger.requests[index]!, ...patch, updatedAt: at };
+  const { pendingOwner, ...rest } = patch;
+  const updated: Request = { ...ledger.requests[index]!, ...rest, updatedAt: at };
+  if (pendingOwner === null) delete updated.pendingOwner;
+  else if (pendingOwner !== undefined) updated.pendingOwner = pendingOwner;
   if (patch.offered !== undefined) updated.offeredAt = at;
   const requests = [...ledger.requests];
   requests[index] = updated;
@@ -116,6 +133,11 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
 
 export function expiredRequests(ledger: Ledger, hours: number, now: number): Request[] {
   return ledger.requests.filter((r) => r.status === "offered" && now - Date.parse(r.offeredAt) >= hours * 3600_000);
+}
+
+// Open requests waiting for the owner to confirm an out-of-hours time.
+export function pendingOwnerList(ledger: Ledger): Request[] {
+  return ledger.requests.filter((r) => r.status === "offered" && r.pendingOwner !== undefined);
 }
 
 export function cleanupList(ledger: Ledger): Request[] {
@@ -172,10 +194,12 @@ if (isMain(import.meta.url)) {
         if (!Number.isFinite(hours) || hours < 0) throw new Error(`--hours must be a number >= 0, got ${values.hours}`);
         return { requests: expiredRequests(readJson<Ledger>(path, EMPTY), hours, now) };
       }
+      case "pending":
+        return { requests: pendingOwnerList(readJson<Ledger>(path, EMPTY)) };
       case "cleanup":
         return { requests: cleanupList(readJson<Ledger>(path, EMPTY)).map((r) => ({ id: r.id, holdCleanup: r.holdCleanup })) };
       default:
-        throw new Error("usage: ledger.ts find | add | update | expired | cleanup");
+        throw new Error("usage: ledger.ts find | add | update | expired | pending | cleanup");
     }
   });
 }

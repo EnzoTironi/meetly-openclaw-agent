@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  addRequest, cleanupList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest,
+  addRequest, cleanupList, pendingOwnerList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest,
   type Ledger, type NewRequest,
 } from "../skills/meetly/scripts/ledger.ts";
 import { cli, tmpHome } from "./helpers.ts";
@@ -94,6 +94,19 @@ test("cleanup lists only requests with pending hold deletes", () => {
   assert.deepEqual(cleanupList(l).map((r) => r.id), ["r_2"]);
 });
 
+test("pendingOwner is set, listed and cleared", () => {
+  let l = addRequest(empty(), input(), T0, "r_1");
+  const pending = { start: "2026-10-03T10:00:00-03:00", end: "2026-10-03T10:30:00-03:00", askedAt: new Date(T0).toISOString() };
+  l = updateRequest(l, "r_1", { pendingOwner: pending }, T0);
+  assert.deepEqual(pendingOwnerList(l).map((r) => r.pendingOwner), [pending]);
+  assert.throws(() => updateRequest(l, "r_1", { pendingOwner: { ...pending, start: "sat" } }, T0), /pendingOwner/);
+  l = updateRequest(l, "r_1", { pendingOwner: null }, T0);
+  assert.equal("pendingOwner" in l.requests[0]!, false);
+  assert.deepEqual(pendingOwnerList(l), []);
+  l = updateRequest(l, "r_1", { pendingOwner: pending, status: "booked" }, T0);
+  assert.deepEqual(pendingOwnerList(l), []);
+});
+
 test("CLI add, find, update, expired and cleanup round-trip", () => {
   const home = tmpHome();
   const env = { MEETLY_HOME: home };
@@ -112,6 +125,9 @@ test("CLI add, find, update, expired and cleanup round-trip", () => {
   assert.deepEqual(cli("ledger.ts", ["cleanup"], env).json, { requests: [] });
   cli("ledger.ts", ["update", "--id", id, "--json", '{"holdCleanup":[{"holdId":"h1","account":"a"}]}'], env);
   assert.deepEqual(cli("ledger.ts", ["cleanup"], env).json, { requests: [{ id, holdCleanup: [{ holdId: "h1", account: "a" }] }] });
+  const pend = { start: "2026-10-03T10:00:00-03:00", end: "2026-10-03T10:30:00-03:00", askedAt: "2026-09-28T12:00:00Z" };
+  cli("ledger.ts", ["update", "--id", id, "--json", JSON.stringify({ pendingOwner: pend })], env);
+  assert.deepEqual(cli("ledger.ts", ["pending"], env).json.requests.map((r: { id: string }) => r.id), [id]);
   const dup = cli("ledger.ts", ["add", "--json", JSON.stringify(input())], env);
   assert.equal(dup.status, 1);
   assert.match(dup.stderr, /already exists/);

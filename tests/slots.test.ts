@@ -158,5 +158,6 @@ test("checkTime: a time the person insists on", () => {
   assert.equal(check("2026-09-28T09:00:00-03:00").reason, "too-soon");
   assert.equal(check("2026-10-03T10:00:00-03:00", { unknownAfter: "2026-10-02T00:00:00-03:00" }).reason, "unknown");
   assert.equal(check("2026-10-03T10:00:00-03:00", { locale: "en-US" }).slot.label, "Sat, 10/3, 10:00 AM");
+  assert.equal(check("2026-10-03T10:00").slot.start, "2026-10-03T10:00:00-03:00");
   assert.throws(() => check("someday"), /not a time/);
 });

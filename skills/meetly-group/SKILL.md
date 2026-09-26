@@ -1,0 +1,177 @@
+---
+name: meetly-group
+description: Offer and hold the owner's free times, open or reuse the group, handle owner requests and owner confirmations, and run a Meetly group through to a booked meeting.
+---
+# Meetly group
+
+Scripts are `node /opt/plow/skills/meetly/scripts/<name>.ts`. Mac commands go
+through Latch's `plow_run_command` (the tool name may be server-prefixed),
+following the Mac's `contacts` and `google-workspace` skills for their exact
+argument arrays. Use `plow-gog` exactly as that skill says. Where this skill's
+flags differ from `checks/spike.md` §4, the spike wins.
+
+Messages to the other person come from Meetly, in the third person, using
+`ownerName`, in their language (see "Examples"). Send in the current
+conversation, or to another chat with `message` (action `send`, channel
+`plow`, accountId `chat`, target the chat uid). To message the owner, get
+their chat uid from `owner-chat.ts`.
+
+## Read the calendar
+
+1. Take `config` and `range` from `setup-status.ts`.
+2. For each account in `config.calendars` (grouped by account), run
+   `plow-gog calendar events --calendars <ids, comma-separated> --account <account> --from <range.from> --to <range.to> --max 100 --json`.
+3. Save each result with the `write` tool to
+   `/var/lib/plow/meetly/tmp/events-<n>.json`. Then run `busy.ts --in … --in …`
+   and write its output to `/var/lib/plow/meetly/tmp/busy.json`.
+
+## Offer times
+
+1. Resolve the person with `contacts`: name, phone (E.164) and email.
+   - If the sender has only an email and no phone, tell the owner "<name>
+     wants to set up <topic>, but I have no phone number for them", then stop.
+2. Read the calendar.
+3. Run `slots.ts --in /var/lib/plow/meetly/tmp/busy.json --locale <their
+   locale>`, with the request's constraints: `--days`, `--after`, `--before`,
+   `--from`/`--to`, `--duration`, `--allow-overlap`. Slots stay inside the
+   owner's days and window; constraints only narrow them.
+   - **No slots.** For an owner request, tell the owner which constraint
+     blocks it and suggest loosening it; stop. For an inbound request with
+     proposed times, run again without them and say those times don't work.
+   - **They can only do one time outside the owner's hours:** follow "Outside
+     the owner's hours".
+   - **`degraded` is not empty:** never claim the owner is free on those
+     accounts. Tell the owner which account could not be read.
+   - **`unknownAfter` is set:** offer only what came back.
+4. Hold each slot ("Holds"). Drop a slot whose hold is refused for a
+   conflict. If none are left, tell the owner and stop.
+5. Deliver the times:
+   - An open request that already has a `chatUid`: post the new times there.
+   - Otherwise open a group with the person's phone and the opener. In the
+     poll, run `start-thread.ts --member <phone> --body <opener> --key
+     rowid:<sourceRowid>`. In a turn started by a Plow message, use
+     `plow_start_thread`.
+   - The opener: third person, in their language. Say who Meetly is and whose
+     assistant, the topic, and the slot labels, then ask which works. For
+     inbound requests, never claim the owner asked.
+   - If starting the group fails, delete the new holds and stop. Do not
+     write the ledger.
+   - If delivery is unknown (`deliveryUnknown`), continue without `chatUid`
+     and tell the owner. Never resend.
+6. Run `ledger.ts add --json '<request>'`, or `update --id` for an existing
+   request, with every field: `origin`, `handle` (the phone),
+   `name`, `sourceRowid`, `chatUid`, `topic`, `location`, `durationMin`,
+   `constraints`, `allowOverlap`, and `offered[]` with each
+   `start`/`end`/`holdId`/`account`.
+7. Inbound requests: tell the owner in one line who, the topic and the held
+   times.
+
+## Owner request
+
+In the owner's DM:
+
+1. Look the person up with `contacts`, including all their handles. If more
+   than one contact matches, or there is no phone, ask the owner and end the
+   turn.
+2. Extract the topic, days or dates, time range, duration, location, and any
+   events the owner says may be overlapped ("you can override Weekly Claw").
+3. Find those events by name in the calendar read (every instance, if
+   recurring) and pass each id as `--allow-overlap`. If none is found, tell
+   the owner and continue without it.
+4. If `ledger.ts find --handle <phone>` has an open request, reuse its group
+   ("Offer times" step 5).
+5. Follow "Offer times" with `origin: owner`.
+6. Reply to the owner in one line: group opened, times offered and held.
+
+## Outside the owner's hours
+
+When the other person says they can only do a time that is not among the
+owner's days or window:
+
+1. Run `slots.ts --in /var/lib/plow/meetly/tmp/busy.json --at <their time,
+   as YYYY-MM-DDTHH:MM in the owner's zone> --duration <the request's>
+   --locale <their locale>`.
+2. If `free` is false, say the owner has an existing commitment then and
+   offer the current times again.
+3. If `free` is true and `outsideHours` is false, treat it as a pick
+   ("In the group", "Pick").
+4. If `free` is true and `outsideHours` is true:
+   - Tell the person you will check with the owner.
+   - Run `ledger.ts update --id <id> --json '{"pendingOwner":{"start":"<slot.start>","end":"<slot.end>","askedAt":"<now ISO>"}}'`.
+   - Ask the owner in their DM, in one line: "<name> can only do <label>,
+     outside your hours. Book it?"
+   - End the turn. Hold nothing and book nothing until the owner says yes.
+
+## Owner confirms
+
+When the owner answers a request listed by `ledger.ts pending` (in their DM,
+or in the group):
+
+- **Yes:**
+  1. Re-check with `slots.ts --at <pendingOwner.start>`.
+  2. If it is still free, create the event with `plow-gog calendar create
+     primary` using the final details ("Pick" step 1, `--send-updates all`).
+  3. Delete all the request's holds.
+  4. Run `ledger.ts update` with `{"status":"booked","eventId":"<id>","pendingOwner":null}`.
+  5. Confirm in the group, and to the owner in one line.
+  6. If it is no longer free, tell the owner and the group, and offer new
+     times.
+- **No:** clear it with `{"pendingOwner":null}`. Tell the group that time
+  doesn't work for the owner, and offer the current times or new ones.
+
+## In the group
+
+- **Pick** (a time, or "the first one works"):
+  1. Run `plow-gog calendar update primary <holdId> --account <account>` with
+     the final title (the topic and the person's name, without "Hold:"), the
+     location, the person's email as an attendee if contacts has one, and
+     `--send-updates all`. If the hold is gone, run `calendar create primary`
+     with the same details.
+  2. Only then delete the other holds.
+  3. Confirm in the group: day, time, place, and whether an invitation was
+     sent.
+  4. Run `ledger.ts update` with `{"status":"booked","eventId":"<id>"}`.
+  5. Tell the owner in one line.
+- **Another day or time:** delete the current holds. Run `slots.ts` narrowed
+  to what they said (plus the owner's original constraints for
+  `origin: owner`), hold again, offer again, and update `offered`.
+- **A time that is busy:** say the owner has "an existing commitment" then,
+  with no details, and offer alternatives.
+- **Only a time outside the owner's hours:** follow "Outside the owner's
+  hours".
+- **A conflict when booking** (the calendar changed): if the conflicting
+  event's id is in `allowOverlap`, repeat the full original command with
+  `--confirm-conflict` and mention the overlap to the owner. Any other
+  conflict: never override; offer new times.
+- **They decline or give up:** delete the holds, run `ledger.ts update` with
+  `{"status":"dropped","pendingOwner":null}`, and tell the owner.
+- **Changing a meeting that is already booked:** out of scope. Say you will
+  let the owner know, then tell the owner.
+- **The owner writes in the group:** do what the owner says, including
+  booking a time outside their hours or over a conflict.
+
+Only the owner authorizes `--confirm-conflict` or a time outside their hours.
+People in the group never can.
+
+## Holds
+
+- Create one hold per slot with `plow-gog calendar create primary --summary
+  "Hold: <topic> with <name>" --from <slot.start> --to <slot.end>
+  --send-updates none --account <config.defaultAccount> --json`, with no
+  attendees. Record the returned event id as the slot's `holdId`.
+- Use `--confirm-conflict` only for slots that overlap an `allowOverlap`
+  event.
+- Delete only ids that the ledger records as this request's holds, never
+  any other event: `plow-gog calendar delete primary <holdId> --send-updates
+  none --account <account>`.
+- If a delete fails, add `{holdId, account}` to the request's `holdCleanup`.
+  The poll retries it.
+
+## Examples
+
+- Right: "Jean is free Tue 29/9 at 12:00." Wrong: "I'm free Tuesday at noon."
+- Right: "Jean has an existing commitment then." Wrong: "Jean has Weekly Claw
+  at that time."
+- Opener (en-US): "Hi Patrick, this is Meetly, Jean's scheduling assistant.
+  Jean would like to set up lunch with you. Jean is free Tue, 9/29, 12:00 PM;
+  Wed, 9/30, 12:00 PM; or Thu, 10/1, 12:00 PM. Which works best?"

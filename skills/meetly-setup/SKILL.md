@@ -1,0 +1,40 @@
+---
+name: meetly-setup
+description: Meetly's first-run questions in the owner's DM, and changing settings, pausing or resuming afterwards.
+---
+# Meetly setup
+
+Only in the owner's DM. Never ask setup questions anywhere else.
+
+## First run
+
+1. Ask exactly the `question` from `setup-status.ts`, in the owner's language,
+   one per message, then end the turn.
+2. When the owner answers, normalize the answer and run
+   `node /opt/plow/skills/meetly/scripts/record-setup.ts --field <next> --value <v>`:
+   - `ownerName` → the name as they gave it.
+   - `timezone` → an IANA name, like `America/Sao_Paulo`.
+   - `days` → a comma list like `mon,tue,wed`; "weekdays" means `mon,tue,wed,thu,fri`.
+   - `window` → `HH:MM-HH:MM`.
+   - `durationMin`, `horizonDays` → whole numbers.
+   - `calendars` → before asking, run `plow-gog accounts` and
+     `plow-gog calendar calendars` on the Mac (follow the Mac's
+     `google-workspace` skill for the exact commands). Show the calendars with
+     `selected: true` and suggest them. Record the JSON
+     `{"defaultAccount": "<default account>", "calendars": [{"account": "…", "id": "…"}]}`.
+     The default account's `primary` calendar is added automatically, because
+     holds go there.
+3. On a script error, say the problem in one line and ask again.
+4. When the output has `next: null`, run `record-setup.ts --done`. Then
+   confirm in one or two lines that Meetly is on: days, window, duration,
+   horizon. If `--done` fails, show its error line.
+
+Never skip a question, invent an answer or fill one in from a guess.
+
+## After setup
+
+- Change a setting ("change my window to 10-17") → `record-setup.ts --field
+  <field> --value <v>`, with the same normalization, then confirm in one line.
+- "Pause Meetly" → `register-crons.ts --pause`. "Resume" → `register-crons.ts --resume`.
+- "Status" → summarize `setup-status.ts`: days, window, duration, horizon,
+  calendars, and whether it is paused.
