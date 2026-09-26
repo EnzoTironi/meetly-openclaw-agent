@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { writeFileSync } from "node:fs";
 import type { Config } from "../skills/meetly/scripts/config.ts";
-import { findSlots, type SlotQuery } from "../skills/meetly/scripts/slots.ts";
+import { checkTime, findSlots, type SlotQuery } from "../skills/meetly/scripts/slots.ts";
 import { writeJson } from "../skills/meetly/scripts/store.ts";
 import { cli, tmpHome } from "./helpers.ts";
 
@@ -49,10 +49,10 @@ test("request days intersect the config days and after narrows the window", () =
   assert.deepEqual(labels({ days: ["thu"], after: "13:10", before: "14:00" }), ["thu 1/10 13:30"]);
 });
 
-test("only the owner can go outside the configured days", () => {
+test("requests only narrow the configured days and window", () => {
   assert.deepEqual(starts({ days: ["sat"] }), []);
-  assert.deepEqual(labels({ days: ["sat"], ownerOverride: true }), ["sat 3/10 09:00", "sat 3/10 09:30", "sat 3/10 10:00"]);
-  assert.deepEqual(labels({ days: ["mon"], after: "19:00", before: "21:00", ownerOverride: true, count: 1 }), ["mon 28/9 19:00"]);
+  assert.deepEqual(starts({ days: ["mon"], after: "19:00", before: "21:00" }), []);
+  assert.deepEqual(labels({ after: "07:00", before: "09:30", count: 2 }), ["tue 29/9 09:00", "wed 30/9 09:00"]);
 });
 
 test("excluded starts are not offered", () => {
@@ -117,11 +117,46 @@ test("the CLI reads busy.ts output and the stored config", () => {
   assert.deepEqual(r.json.degraded, ["other@example.com"]);
   const allowed = cli("slots.ts", ["--in", busyFile, ...now, "--allow-overlap", "weekly", "--count", "1"], env);
   assert.deepEqual(allowed.json.slots.map((s: { label: string }) => s.label), ["mon 28/9 10:00"]);
-  const owner = cli("slots.ts", ["--in", busyFile, ...now, "--days", "sat", "--owner", "--duration", "60"], env);
-  assert.equal(owner.json.slots[0].end, "2026-10-03T10:00:00-03:00");
+  const at = cli("slots.ts", ["--in", busyFile, ...now, "--at", "2026-10-03T10:00:00-03:00", "--duration", "60", "--locale", "pt-BR"], env);
+  assert.equal(at.status, 0, at.stderr);
+  assert.deepEqual(at.json, {
+    slot: { start: "2026-10-03T10:00:00-03:00", end: "2026-10-03T11:00:00-03:00", dayOfWeek: "sat", label: "sáb., 03/10, 10:00" },
+    free: true,
+    outsideHours: true,
+    degraded: ["other@example.com"],
+  });
+  assert.equal(cli("slots.ts", ["--in", busyFile, "--at", "2026-10-03T10:00:00-03:00", "--days", "sat"], env).status, 1);
+  assert.equal(cli("slots.ts", ["--in", busyFile, "--owner"], env).status, 1);
   const us = cli("slots.ts", ["--in", busyFile, ...now, "--locale", "en-US", "--count", "1"], env);
   assert.deepEqual(us.json.slots.map((s: { label: string }) => s.label), ["Mon, 9/28, 11:00 AM"]);
   assert.equal(cli("slots.ts", ["--in", busyFile, "--locale", "??"], env).status, 1);
   assert.equal(cli("slots.ts", ["--in", busyFile, "--days", "someday"], env).status, 1);
   assert.equal(cli("slots.ts", ["--in", busyFile, "--from", "5/10"], env).status, 1);
+});
+
+test("checkTime: a time the person insists on", () => {
+  const check = (start: string, over: Partial<Parameters<typeof checkTime>[0]> = {}) =>
+    checkTime({ now: NOW, config: CONFIG, busy: [], start, ...over });
+  assert.deepEqual(check("2026-09-28T10:00:00-03:00"), {
+    slot: { start: "2026-09-28T10:00:00-03:00", end: "2026-09-28T10:30:00-03:00", dayOfWeek: "mon", label: "mon 28/9 10:00" },
+    free: true,
+    outsideHours: false,
+  });
+  const sat = check("2026-10-03T10:00:00-03:00");
+  assert.equal(sat.free, true);
+  assert.equal(sat.outsideHours, true);
+  assert.equal(check("2026-09-29T19:00:00-03:00").outsideHours, true);
+  assert.equal(check("2026-09-29T17:45:00-03:00").outsideHours, true);
+  assert.equal(check("2026-09-29T08:30:00-03:00").outsideHours, true);
+  assert.equal(check("2026-09-29T17:30:00-03:00").outsideHours, false);
+  const busy = [{ start: "2026-10-03T12:30:00.000Z", end: "2026-10-03T13:30:00.000Z", id: "gym" }];
+  assert.deepEqual(
+    [check("2026-10-03T10:00:00-03:00", { busy }).free, check("2026-10-03T10:00:00-03:00", { busy }).reason],
+    [false, "busy"],
+  );
+  assert.equal(check("2026-10-03T10:00:00-03:00", { busy, allowOverlap: ["gym"] }).free, true);
+  assert.equal(check("2026-09-28T09:00:00-03:00").reason, "too-soon");
+  assert.equal(check("2026-10-03T10:00:00-03:00", { unknownAfter: "2026-10-02T00:00:00-03:00" }).reason, "unknown");
+  assert.equal(check("2026-10-03T10:00:00-03:00", { locale: "en-US" }).slot.label, "Sat, 10/3, 10:00 AM");
+  assert.throws(() => check("someday"), /not a time/);
 });

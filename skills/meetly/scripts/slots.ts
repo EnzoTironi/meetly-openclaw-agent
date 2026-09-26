@@ -1,6 +1,9 @@
 // Free times to offer: the owner's days and window, in the owner's zone,
 // clear of busy time, at least MIN_NOTICE_MIN ahead, spread across days.
 // The label and weekday come from here so the agent never computes a weekday.
+// A request only narrows the owner's days and window. A time outside them is
+// never offered: when the other person can only do such a time, --at checks
+// it and the owner must confirm it before anything is held or booked.
 // With a locale (the other person's, e.g. pt-BR or en-US) the label follows
 // that locale's date and time conventions; without one it is "tue 29/9 12:00".
 import { parseArgs } from "node:util";
@@ -25,7 +28,6 @@ export type SlotQuery = {
   allowOverlap?: string[];
   exclude?: string[];
   count?: number;
-  ownerOverride?: boolean;
   locale?: string;
 };
 
@@ -54,17 +56,11 @@ export function findSlots(q: SlotQuery): { slots: Slot[]; unknownAfter?: string 
   const duration = q.durationMin ?? config.durationMin;
   const count = q.count ?? SLOT_COUNT;
 
-  let days: Day[] = config.days;
-  if (q.days) days = q.ownerOverride ? q.days : config.days.filter((d) => q.days!.includes(d));
+  const days = q.days ? config.days.filter((d) => q.days!.includes(d)) : config.days;
   let startMin = minutes(config.windowStart);
   let endMin = minutes(config.windowEnd);
-  if (q.ownerOverride) {
-    if (q.after) startMin = minutes(q.after);
-    if (q.before) endMin = minutes(q.before);
-  } else {
-    if (q.after) startMin = Math.max(startMin, minutes(q.after));
-    if (q.before) endMin = Math.min(endMin, minutes(q.before));
-  }
+  if (q.after) startMin = Math.max(startMin, minutes(q.after));
+  if (q.before) endMin = Math.min(endMin, minutes(q.before));
   startMin = Math.ceil(startMin / STEP_MIN) * STEP_MIN;
 
   const earliest = now + MIN_NOTICE_MIN * 60_000;
@@ -116,6 +112,48 @@ export function findSlots(q: SlotQuery): { slots: Slot[]; unknownAfter?: string 
   return q.unknownAfter !== undefined ? { slots, unknownAfter: q.unknownAfter } : { slots };
 }
 
+export type TimeCheck = {
+  slot: Slot;
+  free: boolean;
+  reason?: "busy" | "too-soon" | "unknown";
+  outsideHours: boolean;
+};
+
+// Checks one exact time the other person asked for. free: clear of busy time
+// (except allowOverlap), with enough notice, and inside what was read.
+// outsideHours: not on the owner's days or not inside the window, so the
+// owner must confirm before it is held or booked.
+export function checkTime(q: {
+  now: number;
+  config: Config;
+  busy: Busy[];
+  start: string;
+  unknownAfter?: string;
+  durationMin?: number;
+  allowOverlap?: string[];
+  locale?: string;
+}): TimeCheck {
+  const tz = q.config.timezone;
+  const start = Date.parse(q.start);
+  if (Number.isNaN(start)) throw new Error(`not a time: ${q.start}`);
+  const end = start + (q.durationMin ?? q.config.durationMin) * 60_000;
+  const s = wallParts(start, tz);
+  const e = wallParts(end, tz);
+  const sameDay = s.y === e.y && s.m === e.m && s.d === e.d;
+  const outsideHours = !q.config.days.includes(s.weekday) || !sameDay ||
+    s.hh * 60 + s.mm < minutes(q.config.windowStart) || e.hh * 60 + e.mm > minutes(q.config.windowEnd);
+  const allowed = new Set(q.allowOverlap ?? []);
+  let reason: TimeCheck["reason"];
+  if (q.unknownAfter !== undefined && end > Date.parse(q.unknownAfter)) reason = "unknown";
+  else if (start < q.now + MIN_NOTICE_MIN * 60_000) reason = "too-soon";
+  else if (q.busy.some((b) => (b.id === undefined || !allowed.has(b.id)) && Date.parse(b.start) < end && Date.parse(b.end) > start)) {
+    reason = "busy";
+  }
+  const format = q.locale !== undefined ? localeFormatter(q.locale, tz) : undefined;
+  const slot: Slot = { start: localIso(start, tz), end: localIso(end, tz), dayOfWeek: s.weekday, label: label(start, tz, format) };
+  return reason ? { slot, free: false, reason, outsideHours } : { slot, free: true, outsideHours };
+}
+
 function positiveInt(raw: string, flag: string): number {
   if (!/^\d+$/.test(raw) || Number(raw) <= 0) throw new Error(`${flag} must be a positive whole number, got ${raw}`);
   return Number(raw);
@@ -140,7 +178,7 @@ if (isMain(import.meta.url)) {
         "allow-overlap": { type: "string", multiple: true },
         exclude: { type: "string", multiple: true },
         count: { type: "string" },
-        owner: { type: "boolean" },
+        at: { type: "string" },
         now: { type: "string" },
         locale: { type: "string" },
       },
@@ -154,7 +192,19 @@ if (isMain(import.meta.url)) {
     if (!Array.isArray(input.busy)) throw new Error("the busy input has no busy list (pass busy.ts output)");
     const now = values.now !== undefined ? Date.parse(values.now) : Date.now();
     if (Number.isNaN(now)) throw new Error(`--now is not a time: ${values.now}`);
-    const q: SlotQuery = { now, config, busy: input.busy, ownerOverride: values.owner === true };
+    const degraded = input.degraded ?? [];
+    if (values.at !== undefined) {
+      for (const flag of ["days", "after", "before", "from", "to", "exclude", "count"] as const) {
+        if (values[flag] !== undefined) throw new Error(`--at checks one time; drop --${flag}`);
+      }
+      const check: Parameters<typeof checkTime>[0] = { now, config, busy: input.busy, start: values.at };
+      if (input.unknownAfter !== undefined) check.unknownAfter = input.unknownAfter;
+      if (values.duration !== undefined) check.durationMin = positiveInt(values.duration, "--duration");
+      if (values["allow-overlap"]) check.allowOverlap = values["allow-overlap"];
+      if (values.locale !== undefined) check.locale = values.locale;
+      return { ...checkTime(check), degraded };
+    }
+    const q: SlotQuery = { now, config, busy: input.busy };
     if (input.unknownAfter !== undefined) q.unknownAfter = input.unknownAfter;
     if (values.duration !== undefined) q.durationMin = positiveInt(values.duration, "--duration");
     if (values.count !== undefined) q.count = positiveInt(values.count, "--count");
@@ -175,6 +225,6 @@ if (isMain(import.meta.url)) {
       for (const e of values.exclude) if (Number.isNaN(Date.parse(e))) throw new Error(`--exclude is not a time: ${e}`);
       q.exclude = values.exclude;
     }
-    return { ...findSlots(q), degraded: input.degraded ?? [] };
+    return { ...findSlots(q), degraded };
   });
 }
