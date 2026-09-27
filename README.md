@@ -146,10 +146,14 @@ message is skipped.
 
 - **Image.** A variant of Plow's
   [OpenClaw base image](https://github.com/plow-pbc/plow-openclaw-agent),
-  pinned by digest: the base's boot, gateway, Plow channel and reporter, plus
-  Meetly's prompt, skills and a step before the base's boot that sets the
-  model (see [Model](#model)) and installs the setup gate. Nothing of the
-  base is forked.
+  pinned by digest: the base's gateway, Plow channel and reporter, plus
+  Meetly's prompt, skills and its own entrypoint, `boot/preboot.ts`. That is
+  the base's `boot/main.ts` step for step, on the base's compiled modules,
+  with three additions before the config is synced: the model (see
+  [Model](#model)), the setup gate, and a 60 s request timeout on the Mac
+  relay. Without that timeout OpenClaw caps the relay's tool listing at
+  1500 ms, a Mac round trip takes 0.9-1.8 s, and a turn intermittently had no
+  Mac tools at all.
 - **Setup gate.** Before each of the owner's DM turns, the `meetly` plugin
   runs `setup-status.ts` and puts its answer at the top of the turn, so setup
   never depends on the model remembering to check. The base owns
@@ -228,9 +232,9 @@ Meetly reads your messages, so use it on an install only you talk to.
 - `skills/meetly-setup`, `skills/meetly-poll`, `skills/meetly-group` — what
   the agent does in setup, in the scheduled check and in a meeting group.
 - `skills/meetly/scripts/` — the TypeScript CLIs behind them.
-- `boot/` — the step before the base's boot that sets the model
-  (`preboot.ts`, `llm.ts`), installs the setup gate (`gate.ts`), and the
-  `plow-llm` command.
+- `boot/` — the entrypoint (`preboot.ts`, the base's boot plus Meetly's
+  additions), the model (`llm.ts`), the setup gate install (`gate.ts`), the
+  Mac relay timeout (`mcp.ts`) and the `plow-llm` command.
 - `plugin/` — the setup gate: an OpenClaw plugin that runs `setup-status.ts`
   before each of the owner's DM turns and hands the model the answer.
 - `tests/` — `node --test` suites; `tests/fixtures/base-AGENTS.md` is the
@@ -267,10 +271,14 @@ Pick a newer `base-<sha>` tag and its digest from the
 2. Diff the new base prompt against the old fixture and carry any changed
    tool or authority rule into `prompt/AGENTS.md`; `tests/prompt.test.ts`
    fails on a rule the base rewords.
-3. Re-check `compose.yml` and `dev/Caddyfile` against the base.
-4. Re-read the base's `plugin/index.ts` for `plow_start_thread`:
+3. Copy that commit's `boot/main.ts` over `tests/fixtures/base-main.ts.txt`
+   and carry any changed step into `boot/preboot.ts`; `tests/mcp.test.ts`
+   fails on a base step preboot does not have. Drop `boot/mcp.ts` once the
+   base sets the relay's `requestTimeoutMs` itself.
+4. Re-check `compose.yml` and `dev/Caddyfile` against the base.
+5. Re-read the base's `plugin/index.ts` for `plow_start_thread`:
    `start-thread.ts` mirrors its `POST /v1/chats`.
-5. Run `npm test`.
+6. Run `npm test`.
 
 ## License
 
