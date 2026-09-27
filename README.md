@@ -147,7 +147,8 @@ message is skipped.
 - **Image.** A variant of Plow's
   [OpenClaw base image](https://github.com/plow-pbc/plow-openclaw-agent),
   pinned by digest: the base's boot, gateway, Plow channel and reporter, plus
-  Meetly's prompt and skills. Nothing of the base is forked.
+  Meetly's prompt, skills and a step before the base's boot that sets the
+  model (see [Model](#model)). Nothing of the base is forked.
 - **Schedule.** One OpenClaw scheduler job (`openclaw cron`), `meetly-poll`:
   an isolated agent turn every five minutes with no automatic delivery,
   registered by `register-crons.ts` when setup finishes. It lives in the state
@@ -169,6 +170,39 @@ message is skipped.
   `cursor.json` (last message read), `ledger.json` (requests, offered times,
   hold ids). Writes are atomic and locked.
 
+## Model
+
+Every install runs on Plow's GPT-6 Luna. A one-click install has nothing to
+configure and never leaves it. The base's own `plow` provider lists only the
+base's models and is rewritten every boot, so Meetly declares Luna on a
+provider of its own, `plow-luna`: the same Plow endpoint and credential
+reference, in the part of the config the base leaves alone.
+
+The owner of one install can move all of its inference (chat and the
+five-minute poll) to their own OpenAI account. In a login shell on the agent
+(`docker compose exec agent bash -l`, or SSH on the VM):
+
+```sh
+plow-llm openai
+```
+
+It signs in with a device code, checks that the account offers
+`gpt-6-luna` and leaves a marker in the state volume. Restart the agent to
+apply it. The sign-in and the marker live in the state volume, so rebuilds
+and image updates keep them. `plow-llm plow` moves back, and
+`plow-llm status` shows what the next boot will choose.
+
+Plow's Luna stays configured as the fallback: a spent quota or an expired
+sign-in answers from Plow instead of failing. `AGENT_PROVIDER` (`plow`,
+`openai`, `openrouter`) and `AGENT_MODEL` choose a provider from the
+environment instead and outrank the marker; OpenAI then takes
+`OPENAI_API_KEY` or the sign-in, and OpenRouter `OPENROUTER_API_KEY`.
+
+The model is the image's on every boot, so an edit to it in the dashboard
+lasts until the next restart. The sign-in is a real credential for your
+account, kept in the state volume where the agent's own tools can read it.
+Meetly reads your messages, so use it on an install only you talk to.
+
 ## Known limitations
 
 - Only direct iMessage chats; group chats and email requests are not read.
@@ -185,6 +219,8 @@ message is skipped.
 - `skills/meetly-setup`, `skills/meetly-poll`, `skills/meetly-group` — what
   the agent does in setup, in the scheduled check and in a meeting group.
 - `skills/meetly/scripts/` — the TypeScript CLIs behind them.
+- `boot/` — the step before the base's boot that sets the model
+  (`preboot.ts`, `llm.ts`) and the `plow-llm` command.
 - `tests/` — `node --test` suites; `tests/fixtures/base-AGENTS.md` pins the
   base prompt to catch drift.
 - `index/logo.png` — the Agent Index logo (uploaded to the listing, not
