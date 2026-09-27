@@ -76,6 +76,21 @@ function nonEmpty(v: unknown): v is string {
   return typeof v === "string" && v.trim() !== "";
 }
 
+// The calendars to read, by the ids `plow-gog calendar events --calendars`
+// accepts. Holds are created on the default account's primary calendar, so it
+// always counts as busy; a Google account's primary calendar id is the
+// account's own address, and the `primary` alias, which the hold commands take,
+// is not a name the events listing recognizes. Duplicates are dropped.
+export function readableCalendars(calendars: Calendar[], defaultAccount: string): Calendar[] {
+  if (!Array.isArray(calendars) || typeof defaultAccount !== "string" || !defaultAccount) return calendars;
+  const out: Calendar[] = [];
+  for (const c of [...calendars, { account: defaultAccount, id: defaultAccount }]) {
+    const id = c.id === "primary" ? c.account : c.id;
+    if (!out.some((o) => o.account === c.account && o.id === id)) out.push({ account: c.account, id });
+  }
+  return out;
+}
+
 export function parseField(field: string, value: string): Partial<Config> {
   switch (field) {
     case "ownerName": {
@@ -130,10 +145,7 @@ export function parseField(field: string, value: string): Partial<Config> {
         if (!nonEmpty(c?.account) || !nonEmpty(c?.id)) throw new Error(`each calendar needs an account and an id: ${JSON.stringify(c)}`);
         return { account: c.account, id: c.id };
       });
-      // Holds are created on the default account's primary calendar, so it
-      // always counts as busy.
-      if (!list.some((c) => c.account === defaultAccount && c.id === "primary")) list.push({ account: defaultAccount, id: "primary" });
-      return { defaultAccount, calendars: list };
+      return { defaultAccount, calendars: readableCalendars(list, defaultAccount) };
     }
     default:
       throw new Error(`unknown field: ${field} (one of ${FIELDS.join(", ")})`);
@@ -167,7 +179,7 @@ export function validateConfig(partial: Partial<Config>): Config {
     windowEnd: p.windowEnd,
     durationMin: p.durationMin,
     horizonDays: p.horizonDays,
-    calendars: p.calendars,
+    calendars: readableCalendars(p.calendars, p.defaultAccount),
     defaultAccount: p.defaultAccount,
   };
   if (p.setupDoneAt !== undefined) config.setupDoneAt = p.setupDoneAt;
@@ -178,5 +190,6 @@ export function validateConfig(partial: Partial<Config>): Config {
 export function loadConfig(): Config {
   const config = readJson<Config | null>(file("config.json"), null);
   if (!config?.setupDoneAt) throw new Error("Meetly is not set up yet");
-  return config;
+  // A config saved before readableCalendars may still list `primary`.
+  return { ...config, calendars: readableCalendars(config.calendars, config.defaultAccount) };
 }

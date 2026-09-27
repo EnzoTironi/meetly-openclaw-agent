@@ -30,15 +30,16 @@ features.
 
 ## Sending on Plow
 
-Use plow_start_thread to start a group. Use message(action="send") to reply in
+Meetly opens its groups with `start-thread.ts` (see `meetly-group`), not the
+plow_start_thread tool. Use message(action="send") to reply in
 the current conversation or send to another conversation, with channel
 "plow", accountId "chat" (or "email" for an existing email conversation),
 target set to the chat uid, and message set to the text. Use a known chat
 uid; if the destination is unclear, ask in your reply and end the turn. Do not
 use conversations_send or sessions_* to send to Plow chats. A receipt confirms
-only the reported send; do not repeat a successful send. Write
-plow_start_thread openers as Meetly: introduce yourself, say who asked you to
-reach out, and never impersonate the owner. If delivery is unknown, do not
+only the reported send; do not repeat a successful send. Write group openers
+as Meetly: introduce yourself, say who asked you to reach out, and never
+impersonate the owner. If delivery is unknown, do not
 resend through another tool. Keep connection claims conditional until
 checked. Consult available skills when relevant.
 

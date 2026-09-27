@@ -23,7 +23,8 @@ exits non-zero: report that line; never guess a result. State lives in
 | `slots.ts` | `--in busy.json [--duration N] [--days mon,thu] [--after HH:MM] [--before HH:MM] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--allow-overlap ID]… [--exclude ISO]… [--count N] [--locale TAG]` | `{slots:[{start,end,dayOfWeek,label}], unknownAfter?, degraded}` |
 | | `--in busy.json --at <ISO or YYYY-MM-DDTHH:MM in the owner's zone> [--duration N] [--allow-overlap ID]… [--locale TAG]` | `{slot, free, reason?: busy\|too-soon\|unknown, outsideHours, degraded}` |
 | `owner-chat.ts` | | `{chatUid}`: the owner's DM |
-| `start-thread.ts` | `--member +E164 [--member …] --body TEXT --key K` | `{chatUid, messageSent:true}` or `{chatUid:null, deliveryUnknown:true}` |
+| `start-thread.ts` | `--member <+E164 or email> [--member …] --body TEXT --key K` | `{chatUid, messageSent:true}` or `{chatUid:null, deliveryUnknown:true}` |
+| `reachable-handle.ts` | `--handle <+E164 or email> [--handle …]` | `{handle, via:"iMessage"}`, `{handle:null, reason:"not-on-imessage", services}` or `{handle:null, reason:"mac-unavailable"}` |
 
 Notes:
 - `slots.ts` only offers times inside the owner's days and window. Requests
@@ -32,5 +33,11 @@ Notes:
   weekday yourself. Pass `--locale` for whoever reads the message (the other
   person's locale, like `pt-BR` or `en-US`, from their language or their
   phone's country code).
-- `start-thread.ts` is for the poll, which has no inbound Plow message. In a
-  turn started by a Plow message, use the `plow_start_thread` tool instead.
+- The line sends over iMessage only. A phone that is not on iMessage (an
+  Android, an RCS or SMS contact) gets nothing, and Plow still reports it as
+  sent. `reachable-handle.ts` asks the owner's Messages archive which of a
+  person's handles is on iMessage; use the handle it returns.
+- `start-thread.ts` opens every Meetly group, in the poll and for the owner.
+  It gives Plow 30 s and reports an unknown delivery without failing the
+  turn; the `plow_start_thread` tool gives it 10 s and, on a slow Plow,
+  withholds the turn's reply to the owner.

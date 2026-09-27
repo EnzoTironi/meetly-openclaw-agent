@@ -1,8 +1,9 @@
-// Starts a Plow group with the owner and the given phones, from a turn that
-// has no inbound Plow message: the scheduled poll. The base's
-// plow_start_thread tool refuses there ("Starting a thread requires an
-// active message"), so this makes the same POST /v1/chats it makes: the
-// owner's handle plus the phones, trusted, with an idempotency key.
+// Starts a Plow group with the owner and the given phones: every group Meetly
+// opens, in the poll and for the owner. It makes the same POST /v1/chats as
+// the base's plow_start_thread tool (the owner's handle plus the phones,
+// trusted, with an idempotency key), which refuses in the poll ("Starting a
+// thread requires an active message") and gives Plow only 10 s: a slower
+// Plow there reads as an unknown delivery that withholds the rest of the turn.
 //
 // A server error or a lost connection may still have created the group, so
 // it reports { chatUid: null, deliveryUnknown: true } rather than failing:
@@ -11,15 +12,15 @@ import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { isMain, run } from "./cli.ts";
 import { fetchIdentity, findOwnerDm, plowApi, type ApiOptions } from "./owner-chat.ts";
-
-const E164 = /^\+[1-9][0-9]{1,14}$/;
+import { isHandle } from "./reachable-handle.ts";
 
 export type Started = { chatUid: string; messageSent: true } | { chatUid: null; deliveryUnknown: true };
 
 export async function startThread(opts: ApiOptions & { members: string[]; body: string; key: string }): Promise<Started> {
   if (opts.members.length === 0) throw new Error("give at least one phone number");
+  // A phone in E.164 or an iMessage email: reachable-handle.ts says which one.
   for (const m of opts.members) {
-    if (!E164.test(m)) throw new Error(`not an E.164 phone number (like +15551234567): ${m}`);
+    if (!isHandle(m)) throw new Error(`not a phone in E.164 (like +15551234567) or an email: ${m}`);
   }
   if (!opts.body.trim()) throw new Error("the body is empty");
   if (!opts.key.trim()) throw new Error("the key is empty");

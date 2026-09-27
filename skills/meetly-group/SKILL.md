@@ -27,9 +27,16 @@ their chat uid from `owner-chat.ts`.
 
 ## Offer times
 
-1. Resolve the person with `contacts`: name, phone (E.164) and email.
-   - If the sender has only an email and no phone, tell the owner "<name>
-     wants to set up <topic>, but I have no phone number for them", then stop.
+1. Resolve the person with `contacts`: name and every phone (E.164) and
+   email. For an inbound request, their handle is the one they wrote from.
+   For an owner request, run `reachable-handle.ts --handle <each phone and
+   email>` and use the `handle` it returns: the one the owner reaches them on
+   over iMessage.
+   - `reason: "not-on-imessage"`: tell the owner in one line that <name> is
+     not on iMessage at any of their numbers or emails, so Meetly cannot reach
+     them, then stop.
+   - `reason: "mac-unavailable"`: tell the owner the Mac could not be reached
+     to check, then stop.
 2. Read the calendar.
 3. Run `slots.ts --in /var/lib/plow/meetly/tmp/busy.json --locale <their
    locale>`, with the request's constraints: `--days`, `--after`, `--before`,
@@ -47,10 +54,13 @@ their chat uid from `owner-chat.ts`.
    conflict. If none are left, tell the owner and stop.
 5. Deliver the times:
    - An open request that already has a `chatUid`: post the new times there.
-   - Otherwise open a group with the person's phone and the opener. In the
-     poll, run `start-thread.ts --member <phone> --body <opener> --key
-     rowid:<sourceRowid>`. In a turn started by a Plow message, use
-     `plow_start_thread`.
+   - Otherwise open a group with the person's handle and the opener: run
+     `start-thread.ts --member <handle> --body <opener> --key <key>`, with key
+     `rowid:<sourceRowid>` in the poll and `owner:<handle>:<first offered
+     start>` for an owner request. Never the `plow_start_thread` tool: it
+     gives Plow 10 s, and a group Plow takes longer to open reads as an
+     unknown delivery that withholds the rest of the turn, the owner's reply
+     included.
    - The opener: third person, in their language. Say who Meetly is and whose
      assistant, the topic, and the slot labels, then ask which works. For
      inbound requests, never claim the owner asked.
@@ -59,7 +69,7 @@ their chat uid from `owner-chat.ts`.
    - If delivery is unknown (`deliveryUnknown`), continue without `chatUid`
      and tell the owner. Never resend.
 6. Run `ledger.ts add --json '<request>'`, or `update --id` for an existing
-   request, with every field: `origin`, `handle` (the phone),
+   request, with every field: `origin`, `handle` (the one the group was opened with),
    `name`, `sourceRowid`, `chatUid`, `topic`, `location`, `durationMin`,
    `constraints`, `allowOverlap`, and `offered[]` with each
    `start`/`end`/`holdId`/`account`.
@@ -71,14 +81,14 @@ their chat uid from `owner-chat.ts`.
 In the owner's DM:
 
 1. Look the person up with `contacts`, including all their handles. If more
-   than one contact matches, or there is no phone, ask the owner and end the
+   than one contact matches, or there is no phone or email, ask the owner and end the
    turn.
 2. Extract the topic, days or dates, time range, duration, location, and any
    events the owner says may be overlapped ("you can override Weekly Claw").
 3. Find those events by name in the calendar read (every instance, if
    recurring) and pass each id as `--allow-overlap`. If none is found, tell
    the owner and continue without it.
-4. If `ledger.ts find --handle <phone>` has an open request, reuse its group
+4. If `ledger.ts find --handle <handle>` has an open request, reuse its group
    ("Offer times" step 5).
 5. Follow "Offer times" with `origin: owner`.
 6. Reply to the owner in one line: group opened, times offered and held.

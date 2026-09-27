@@ -30,7 +30,8 @@ Only in the owner's DM. Never ask setup questions anywhere else.
      `google-workspace` skill for the exact commands). Show the calendars with
      `selected: true` and suggest them. Record the JSON
      `{"defaultAccount": "<default account>", "calendars": [{"account": "…", "id": "…"}]}`.
-     The default account's `primary` calendar is added automatically, because
+     The default account's primary calendar is added automatically (by the
+     account's address, the id `plow-gog calendar events` accepts), because
      holds go there.
 3. On a script error, say the problem in one line and ask again.
 4. When the output has `next: null`, run `record-setup.ts --done`. Then
