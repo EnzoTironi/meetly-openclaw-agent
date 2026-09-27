@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 // AGENT_MODEL. Plow's model stays behind as the fallback, so a spent quota or
 // an expired sign-in degrades to Plow instead of to silence.
 //
-// Meetly runs the base's boot unchanged, and the base's `plow` provider lists
+// The base renders the config, and the base's `plow` provider lists
 // only its own models and is rewritten every boot. Luna is declared on a
 // provider of Meetly's own, the same Plow endpoint and credential reference,
 // kept in the part of the config the base leaves to the owner.
