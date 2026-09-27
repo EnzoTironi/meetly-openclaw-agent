@@ -32,5 +32,7 @@ Notes:
   weekday yourself. Pass `--locale` for whoever reads the message (the other
   person's locale, like `pt-BR` or `en-US`, from their language or their
   phone's country code).
-- `start-thread.ts` is for the poll, which has no inbound Plow message. In a
-  turn started by a Plow message, use the `plow_start_thread` tool instead.
+- `start-thread.ts` opens every Meetly group, in the poll and for the owner.
+  It gives Plow 30 s and reports an unknown delivery without failing the
+  turn; the `plow_start_thread` tool gives it 10 s and, on a slow Plow,
+  withholds the turn's reply to the owner.

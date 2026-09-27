@@ -47,10 +47,13 @@ their chat uid from `owner-chat.ts`.
    conflict. If none are left, tell the owner and stop.
 5. Deliver the times:
    - An open request that already has a `chatUid`: post the new times there.
-   - Otherwise open a group with the person's phone and the opener. In the
-     poll, run `start-thread.ts --member <phone> --body <opener> --key
-     rowid:<sourceRowid>`. In a turn started by a Plow message, use
-     `plow_start_thread`.
+   - Otherwise open a group with the person's phone and the opener: run
+     `start-thread.ts --member <phone> --body <opener> --key <key>`, with key
+     `rowid:<sourceRowid>` in the poll and `owner:<phone>:<first offered
+     start>` for an owner request. Never the `plow_start_thread` tool: it
+     gives Plow 10 s, and a group Plow takes longer to open reads as an
+     unknown delivery that withholds the rest of the turn, the owner's reply
+     included.
    - The opener: third person, in their language. Say who Meetly is and whose
      assistant, the topic, and the slot labels, then ask which works. For
      inbound requests, never claim the owner asked.

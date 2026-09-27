@@ -1,8 +1,9 @@
-// Starts a Plow group with the owner and the given phones, from a turn that
-// has no inbound Plow message: the scheduled poll. The base's
-// plow_start_thread tool refuses there ("Starting a thread requires an
-// active message"), so this makes the same POST /v1/chats it makes: the
-// owner's handle plus the phones, trusted, with an idempotency key.
+// Starts a Plow group with the owner and the given phones: every group Meetly
+// opens, in the poll and for the owner. It makes the same POST /v1/chats as
+// the base's plow_start_thread tool (the owner's handle plus the phones,
+// trusted, with an idempotency key), which refuses in the poll ("Starting a
+// thread requires an active message") and gives Plow only 10 s: a slower
+// Plow there reads as an unknown delivery that withholds the rest of the turn.
 //
 // A server error or a lost connection may still have created the group, so
 // it reports { chatUid: null, deliveryUnknown: true } rather than failing:

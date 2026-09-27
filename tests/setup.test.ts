@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { FIELDS, holdHours, parseField, parseTime, validateConfig, type Config } from "../skills/meetly/scripts/config.ts";
+import { FIELDS, holdHours, parseField, parseTime, readableCalendars, validateConfig, type Config } from "../skills/meetly/scripts/config.ts";
 import { finish, record } from "../skills/meetly/scripts/record-setup.ts";
 import { status, statusFilling } from "../skills/meetly/scripts/setup-status.ts";
 import { readJson } from "../skills/meetly/scripts/store.ts";
@@ -100,16 +100,21 @@ test("durations and horizons are bounded integers", () => {
   assert.deepEqual(parseField("horizonDays", "14"), { horizonDays: 14 });
 });
 
-test("calendars always include the default account's primary", () => {
+test("calendars always include the default account's primary, by the id the events listing takes", () => {
   assert.deepEqual(parseField("calendars", CALENDARS), {
     defaultAccount: "jean@example.com",
     calendars: [
       { account: "jean@example.com", id: "work@group.calendar.google.com" },
-      { account: "jean@example.com", id: "primary" },
+      { account: "jean@example.com", id: "jean@example.com" },
     ],
   });
-  const withPrimary = JSON.stringify({ defaultAccount: "a@x", calendars: [{ account: "a@x", id: "primary" }] });
-  assert.equal((parseField("calendars", withPrimary).calendars ?? []).length, 1);
+  // `primary` and the account's address are the same calendar: one entry, never the alias.
+  for (const ids of [["primary"], ["a@x"], ["a@x", "primary"], ["primary", "a@x"]]) {
+    const value = JSON.stringify({ defaultAccount: "a@x", calendars: ids.map((id) => ({ account: "a@x", id })) });
+    assert.deepEqual(parseField("calendars", value).calendars, [{ account: "a@x", id: "a@x" }], JSON.stringify(ids));
+  }
+  assert.deepEqual(readableCalendars([{ account: "b@x", id: "primary" }], "a@x"),
+    [{ account: "b@x", id: "b@x" }, { account: "a@x", id: "a@x" }]);
   assert.throws(() => parseField("calendars", "not json"));
   assert.throws(() => parseField("calendars", JSON.stringify({ defaultAccount: "", calendars: [] })));
   assert.throws(() => parseField("calendars", JSON.stringify({ defaultAccount: "a@x", calendars: [{ account: "a@x" }] })));

@@ -92,3 +92,10 @@ test("setup fills the owner's name and time zone by itself and asks only when th
   assert.ok(setup.includes("Neither is announced"));
   assert.ok(setup.includes("translated into the owner's language"));
 });
+
+test("every Meetly group is opened with start-thread.ts, never the base's 10-second tool", () => {
+  const group = flat(readFileSync(join(SKILLS, "meetly-group", "SKILL.md"), "utf8"));
+  assert.ok(group.includes("`owner:<phone>:<first offered start>` for an owner request"));
+  assert.ok(group.includes("Never the `plow_start_thread` tool"));
+  assert.ok(flat(prompt).includes("Meetly opens its groups with `start-thread.ts`"));
+});
