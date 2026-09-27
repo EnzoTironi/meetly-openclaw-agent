@@ -12,15 +12,15 @@ import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { isMain, run } from "./cli.ts";
 import { fetchIdentity, findOwnerDm, plowApi, type ApiOptions } from "./owner-chat.ts";
-
-const E164 = /^\+[1-9][0-9]{1,14}$/;
+import { isHandle } from "./reachable-handle.ts";
 
 export type Started = { chatUid: string; messageSent: true } | { chatUid: null; deliveryUnknown: true };
 
 export async function startThread(opts: ApiOptions & { members: string[]; body: string; key: string }): Promise<Started> {
   if (opts.members.length === 0) throw new Error("give at least one phone number");
+  // A phone in E.164 or an iMessage email: reachable-handle.ts says which one.
   for (const m of opts.members) {
-    if (!E164.test(m)) throw new Error(`not an E.164 phone number (like +15551234567): ${m}`);
+    if (!isHandle(m)) throw new Error(`not a phone in E.164 (like +15551234567) or an email: ${m}`);
   }
   if (!opts.body.trim()) throw new Error("the body is empty");
   if (!opts.key.trim()) throw new Error("the key is empty");

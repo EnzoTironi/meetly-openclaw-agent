@@ -69,7 +69,7 @@ test("a server error or a lost connection means delivery is unknown", async () =
 
 test("a refused request, bad phones or no owner handle fail loudly", async () => {
   await assert.rejects(startThread({ ...args, fetch: fakeFetch(() => new Response('{"error":"nope"}', { status: 422 })), base, token: "t" }), /HTTP 422/);
-  await assert.rejects(startThread({ ...args, members: ["ana@example.com"], fetch: fakeFetch(() => new Response("{}")), base, token: "t" }), /E\.164/);
+  await assert.rejects(startThread({ ...args, members: ["ana"], fetch: fakeFetch(() => new Response("{}")), base, token: "t" }), /E\.164.*or an email/);
   await assert.rejects(startThread({ ...args, members: [], fetch: fakeFetch(() => new Response("{}")), base, token: "t" }), /at least one/);
   await assert.rejects(startThread({ ...args, body: " ", fetch: fakeFetch(() => new Response("{}")), base, token: "t" }), /body/);
   const noHandle = structuredClone(identity);
@@ -85,4 +85,11 @@ test("the CLI needs a key and the Plow env", () => {
   const noEnv = cli("start-thread.ts", ["--member", "+15551234567", "--body", "hi", "--key", "k"], { PLOW_API_BASE: "", PLOW_AGENT_TOKEN: "" });
   assert.equal(noEnv.status, 1);
   assert.match(noEnv.stderr, /PLOW_API_BASE/);
+});
+
+test("an iMessage email is a member like a phone, which is how an Android owner of an iPad is reached", async () => {
+  const calls: Call[] = [];
+  const out = await startThread({ ...args, members: ["ana@example.com"], fetch: fakeFetch(() => new Response('{"uid":"chat_e"}', { status: 200 }), calls), base, token: "tok" });
+  assert.deepEqual(out, { chatUid: "chat_e", messageSent: true });
+  assert.deepEqual(JSON.parse(String(calls[1]!.init?.body)).members, ["+5511999990000", "ana@example.com"]);
 });
