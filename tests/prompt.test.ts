@@ -51,3 +51,12 @@ test("the poll message is what the prompt keys on", () => {
   assert.ok(POLL_MESSAGE.startsWith("Meetly poll."));
   assert.ok(readFileSync(join(SKILLS, "meetly-poll", "SKILL.md"), "utf8").includes("start-thread.ts"));
 });
+
+test("Meetly introduces itself as Meetly, never by the configured name or as the owner", () => {
+  const meetly = prompt.slice(prompt.indexOf("\n## Meetly\n"));
+  assert.match(meetly, /\*\*Your name is Meetly\.\*\*/);
+  assert.match(meetly, /whatever name the configuration or the Plow line shows/);
+  assert.match(meetly, /never the owner/);
+  const setup = readFileSync(join(SKILLS, "meetly-setup", "SKILL.md"), "utf8");
+  assert.match(setup, /opens with one\s+line saying you are Meetly/);
+});
