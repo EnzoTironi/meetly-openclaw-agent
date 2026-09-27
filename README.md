@@ -148,7 +148,15 @@ message is skipped.
   [OpenClaw base image](https://github.com/plow-pbc/plow-openclaw-agent),
   pinned by digest: the base's boot, gateway, Plow channel and reporter, plus
   Meetly's prompt, skills and a step before the base's boot that sets the
-  model (see [Model](#model)). Nothing of the base is forked.
+  model (see [Model](#model)) and installs the setup gate. Nothing of the
+  base is forked.
+- **Setup gate.** Before each of the owner's DM turns, the `meetly` plugin
+  runs `setup-status.ts` and puts its answer at the top of the turn, so setup
+  never depends on the model remembering to check. The base owns
+  `plugins.load`, so the plugin sits in the state volume's global plugin root
+  (`/var/lib/plow/extensions/meetly`), copied there from the image on every
+  boot. The owner's name comes from their Plow profile and the time zone from
+  their Mac through Latch; setup asks only what neither can answer.
 - **Schedule.** One OpenClaw scheduler job (`openclaw cron`), `meetly-poll`:
   an isolated agent turn every five minutes with no automatic delivery,
   registered by `register-crons.ts` when setup finishes. It lives in the state
@@ -221,7 +229,10 @@ Meetly reads your messages, so use it on an install only you talk to.
   the agent does in setup, in the scheduled check and in a meeting group.
 - `skills/meetly/scripts/` — the TypeScript CLIs behind them.
 - `boot/` — the step before the base's boot that sets the model
-  (`preboot.ts`, `llm.ts`) and the `plow-llm` command.
+  (`preboot.ts`, `llm.ts`), installs the setup gate (`gate.ts`), and the
+  `plow-llm` command.
+- `plugin/` — the setup gate: an OpenClaw plugin that runs `setup-status.ts`
+  before each of the owner's DM turns and hands the model the answer.
 - `tests/` — `node --test` suites; `tests/fixtures/base-AGENTS.md` is the
   base prompt the tool and authority rules are checked against.
 - `index/logo.png` — the Agent Index logo (uploaded to the listing, not

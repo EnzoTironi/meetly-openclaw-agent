@@ -15,8 +15,10 @@ ENV AGENT_ID=meetly \
 COPY prompt/AGENTS.md /opt/plow/prompt/AGENTS.md
 COPY skills/ /opt/plow/skills/
 
-# The model: Plow's Luna by default, the owner's own OpenAI account after
-# `plow-llm openai`. Set before the base's boot, which then runs unchanged.
+# Before the base's boot, which then runs unchanged: the model (Plow's Luna
+# by default, the owner's own OpenAI account after `plow-llm openai`) and the
+# setup gate plugin, which runs setup-status.ts before each owner DM turn.
 COPY boot/ /opt/meetly/boot/
+COPY plugin/ /opt/meetly/plugin/
 COPY boot/plow-llm.sh /usr/local/bin/plow-llm
 CMD ["node", "/opt/meetly/boot/preboot.ts"]

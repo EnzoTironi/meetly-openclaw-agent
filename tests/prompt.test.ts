@@ -84,3 +84,12 @@ test("Meetly introduces itself as Meetly, never by the configured name, as the o
   assert.match(setup, /opens with one\s+line saying you\s+are Meetly/);
   assert.ok(text.includes("only its output says what to ask now"));
 });
+
+test("setup reads the time zone from the Mac like The Founder Times, and asks only as a last resort", () => {
+  const setup = flat(readFileSync(join(SKILLS, "meetly-setup", "SKILL.md"), "utf8"));
+  assert.ok(setup.includes("## Time zone from the Mac"));
+  for (const url of ["https://ipapi.co/json/", "https://ipwho.is/", "https://ifconfig.co/json"]) assert.ok(setup.includes(url), url);
+  assert.ok(setup.includes("Never fetch it from the container"));
+  assert.ok(setup.includes("Only when the Mac is not connected, or no provider gives a valid zone, ask the owner"));
+  assert.ok(setup.includes("translated into the owner's language"));
+});
