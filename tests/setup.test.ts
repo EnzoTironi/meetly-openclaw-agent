@@ -36,7 +36,7 @@ test("empty home needs setup, starting with the owner's name", () => {
     const s = status();
     assert.equal(s.status, "SETUP_NEEDED");
     assert.equal(s.status === "SETUP_NEEDED" && s.next, "ownerName");
-    assert.equal(s.status === "SETUP_NEEDED" && s.question, "What name should I use for you when I talk to other people?");
+    assert.equal(s.status === "SETUP_NEEDED" && s.question, "When I talk to other people for you, I write about you by name, like \"Ana is free at 3pm\". What name should I use?");
   });
 });
 

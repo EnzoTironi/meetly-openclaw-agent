@@ -26,7 +26,7 @@ export const FIELDS = ["ownerName", "timezone", "days", "window", "durationMin",
 export type Field = (typeof FIELDS)[number];
 
 export const QUESTIONS: Record<Field, string> = {
-  ownerName: "What name should I use for you when I talk to other people?",
+  ownerName: "When I talk to other people for you, I write about you by name, like \"Ana is free at 3pm\". What name should I use?",
   timezone: "What time zone are you in?",
   days: "Which days of the week can I book meetings for you?",
   window: "Between what times on those days?",

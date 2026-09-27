@@ -9,7 +9,10 @@ Only in the owner's DM. Never ask setup questions anywhere else.
 ## First run
 
 1. Ask exactly the `question` from `setup-status.ts`, in the owner's language,
-   one per message, then end the turn.
+   one per message, then end the turn. The first setup message opens with one
+   line saying you are Meetly, their AI scheduling assistant, and that a few
+   questions set you up. If the owner asked for something else, such as
+   reaching someone, say in that line that you will do it once setup is done.
 2. When the owner answers, normalize the answer and run
    `node /opt/plow/skills/meetly/scripts/record-setup.ts --field <next> --value <v>`:
    - `ownerName` → the name as they gave it.
