@@ -26,9 +26,8 @@ test("unfinished setup tells the model to introduce Meetly and ask the current q
   assert.match(context, /ignore any earlier setup question in the chat/);
   assert.match(context, /you are Meetly, their AI scheduling assistant/);
   assert.match(context, /refer to them as Ana Lima when you talk to other people/);
-  // The time zone comes from the Mac, like The Founder Times, not from a question.
-  assert.match(context, /Do not ask the time zone: read it from the owner's Mac/);
-  assert.doesNotMatch(context, /translated into the owner's language, and end the turn: What time zone/);
+  // setup-status.ts already tried the Mac; a timezone still pending is for the owner.
+  assert.match(context, /translated into the owner's language, and end the turn: What time zone are you in\?/);
   assert.match(context, /Do not run setup-status\.ts again this turn/);
 });
 
@@ -67,10 +66,4 @@ test("preboot enables the gate with conversation access and replaces the volume'
   await installGate(join(import.meta.dirname, "..", "plugin"), target);
   assert.equal(await readFile(join(target, "index.js"), "utf8"), await readFile(join(import.meta.dirname, "..", "plugin", "index.js"), "utf8"));
   assert.ok(JSON.parse(await readFile(join(target, "openclaw.plugin.json"), "utf8")).id === "meetly");
-});
-
-test("the zone read from the Mac is recorded silently", () => {
-  const context = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: {} }))!;
-  assert.match(context, /record it without mentioning it to the owner/);
-  assert.doesNotMatch(context, /which zone you found/);
 });

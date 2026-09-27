@@ -41,18 +41,17 @@ export function gateContext(stdout) {
     "- If you have not introduced yourself in this conversation yet, open with one line: you are Meetly, their AI scheduling assistant, and a few questions set you up.",
     ...(name ? [`- In that line, say you will refer to them as ${name} when you talk to other people, and that they can change it.`] : []),
     "- If the owner asked for something else, such as reaching someone, say you will do it once setup is done.",
-    status.next === "timezone"
-      ? "- Do not ask the time zone: read it from the owner's Mac as meetly-setup \"Time zone from the Mac\" says, record it without mentioning it to the owner, and ask the question record-setup.ts returns. Ask the owner only if the Mac cannot answer."
-      : status.question
-        ? `- Then ask this question, translated into the owner's language, and end the turn: ${status.question}`
-        : "- Every answer is in: run record-setup.ts --done and confirm that Meetly is on, as meetly-setup says.",
+    status.question
+      ? `- Then ask this question, translated into the owner's language, and end the turn: ${status.question}`
+      : "- Every answer is in: run record-setup.ts --done and confirm that Meetly is on, as meetly-setup says.",
     `If the owner's message answers ${status.next ? `the ${status.next} question` : "a question"}, record it first with record-setup.ts (see meetly-setup) and ask the question it returns instead.`,
     `setup-status.ts output: ${JSON.stringify(status)}`,
   ].join("\n");
 }
 
+// setup-status.ts may ask Plow for the owner's name and the Mac for their time zone.
 const runStatus = () => new Promise((resolve, reject) => {
-  execFile(process.execPath, [SETUP_STATUS], { env: process.env, timeout: 15_000, maxBuffer: 65_536 },
+  execFile(process.execPath, [SETUP_STATUS], { env: process.env, timeout: 30_000, maxBuffer: 65_536 },
     (error, stdout) => error ? reject(error) : resolve(stdout));
 });
 
