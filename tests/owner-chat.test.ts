@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findOwnerChat, ownerChat, type Identity } from "../skills/meetly/scripts/owner-chat.ts";
+import { findOwnerChat, ownerChat, ownerDisplayName, type Identity } from "../skills/meetly/scripts/owner-chat.ts";
 
 const self = { type: "agent", relationship: "self", line: { uid: "line_me" } };
 const owner = { type: "member", role: "owner" };
@@ -53,3 +53,12 @@ test("ownerChat fails loudly", async () => {
   await assert.rejects(ownerChat({ fetch: fakeFetch(200, identity([])), base: "", token: "t" }), /PLOW_API_BASE/);
   await assert.rejects(ownerChat({ fetch: fakeFetch(200, identity([])), base, token: "" }), /PLOW_AGENT_TOKEN/);
 });
+
+test("ownerDisplayName reads the owner's profile name from their DM", async () => {
+  const named = { ...owner, display_name: " Jean Jacintho " };
+  const opts = (body: unknown) => ({ fetch: fakeFetch(200, body), base: "https://api.plow.test", token: "tok" });
+  assert.equal(await ownerDisplayName(opts(identity([chat("dm", [self, named])]))), "Jean Jacintho");
+  assert.equal(await ownerDisplayName(opts(identity([chat("dm", [self, owner])]))), undefined);
+  assert.equal(await ownerDisplayName(opts(identity([]))), undefined);
+});
+

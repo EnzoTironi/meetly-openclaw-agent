@@ -58,5 +58,6 @@ test("Meetly introduces itself as Meetly, never by the configured name or as the
   assert.match(meetly, /whatever name the configuration or the Plow line shows/);
   assert.match(meetly, /never the owner/);
   const setup = readFileSync(join(SKILLS, "meetly-setup", "SKILL.md"), "utf8");
-  assert.match(setup, /opens with one\s+line saying you are Meetly/);
+  assert.match(setup, /opens with one\s+line saying you\s+are Meetly/);
+  assert.match(meetly, /only its output says what to ask now/);
 });

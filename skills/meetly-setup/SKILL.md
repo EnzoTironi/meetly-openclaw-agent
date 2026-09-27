@@ -8,11 +8,16 @@ Only in the owner's DM. Never ask setup questions anywhere else.
 
 ## First run
 
-1. Ask exactly the `question` from `setup-status.ts`, in the owner's language,
-   one per message, then end the turn. The first setup message opens with one
-   line saying you are Meetly, their AI scheduling assistant, and that a few
-   questions set you up. If the owner asked for something else, such as
-   reaching someone, say in that line that you will do it once setup is done.
+1. Ask exactly the `question` that `setup-status.ts` returns on this turn, in
+   the owner's language, one per message, then end the turn. A question asked
+   earlier in the chat is not the current one: always run the script and ask
+   what it returns now. The first setup message opens with one line saying you
+   are Meetly, their AI scheduling assistant, and that a few questions set you
+   up. `setup-status.ts` takes the owner's name from their Plow profile; when
+   `draft.ownerName` is set, that line also says the name you will use for
+   them with other people and that they can change it. If the owner asked for
+   something else, such as reaching someone, say in that line that you will do
+   it once setup is done.
 2. When the owner answers, normalize the answer and run
    `node /opt/plow/skills/meetly/scripts/record-setup.ts --field <next> --value <v>`:
    - `ownerName` → the name as they gave it.
@@ -36,8 +41,10 @@ Never skip a question, invent an answer or fill one in from a guess.
 
 ## After setup
 
-- Change a setting ("change my window to 10-17") → `record-setup.ts --field
-  <field> --value <v>`, with the same normalization, then confirm in one line.
+- Change a setting ("change my window to 10-17", "call me Jean") →
+  `record-setup.ts --field <field> --value <v>`, with the same normalization,
+  then confirm in one line. During setup the owner can change the name the
+  same way before answering the current question.
 - "Pause Meetly" → `register-crons.ts --pause`. "Resume" → `register-crons.ts --resume`.
 - "Status" → summarize `setup-status.ts`: days, window, duration, horizon,
   calendars, and whether it is paused.

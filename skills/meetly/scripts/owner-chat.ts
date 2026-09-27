@@ -9,6 +9,7 @@ export type Participant = {
   relationship?: string;
   role?: string;
   provider_key?: string;
+  display_name?: string | null;
   line?: { uid?: string };
 };
 export type Chat = { uid: string; status?: string; participants?: Participant[] };
@@ -50,6 +51,14 @@ export function findOwnerDm(identity: Identity): Chat | null {
 
 export function findOwnerChat(identity: Identity): string | null {
   return findOwnerDm(identity)?.uid ?? null;
+}
+
+// The name on the owner's Plow profile, as their DM shows it; undefined when
+// Plow has none, or the owner has not texted this line yet.
+export async function ownerDisplayName(opts: ApiOptions = {}): Promise<string | undefined> {
+  const dm = findOwnerDm(await fetchIdentity(plowApi(opts)));
+  const owner = dm?.participants?.find((p) => p.type === "member" && p.role === "owner");
+  return owner?.display_name?.trim() || undefined;
 }
 
 export async function ownerChat(opts: ApiOptions = {}): Promise<{ chatUid: string }> {

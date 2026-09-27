@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { FIELDS, holdHours, parseField, parseTime, validateConfig, type Config } from "../skills/meetly/scripts/config.ts";
 import { finish, record } from "../skills/meetly/scripts/record-setup.ts";
-import { status } from "../skills/meetly/scripts/setup-status.ts";
+import { status, statusFillingName } from "../skills/meetly/scripts/setup-status.ts";
 import { readJson } from "../skills/meetly/scripts/store.ts";
 import { cli, tmpHome } from "./helpers.ts";
 
@@ -203,3 +203,36 @@ test("hold hours default to 48 and accept an override", () => {
     else process.env.MEETLY_HOLD_HOURS = saved;
   }
 });
+
+test("the owner's Plow profile name answers the first question, so setup starts at the time zone", async () => {
+  const saved = process.env.MEETLY_HOME;
+  process.env.MEETLY_HOME = tmpHome();
+  try {
+    const s = await statusFillingName(async () => "  Jean Jacintho ");
+    assert.equal(s.status === "SETUP_NEEDED" && s.next, "timezone");
+    assert.equal(s.status === "SETUP_NEEDED" && s.draft.ownerName, "Jean Jacintho");
+    // Once filled it is not looked up again, and the owner can still change it.
+    const again = await statusFillingName(async () => { throw new Error("not called"); });
+    assert.equal(again.status === "SETUP_NEEDED" && again.next, "timezone");
+    record("ownerName", "Jean");
+    assert.equal(status().status === "SETUP_NEEDED" && (status() as { draft: { ownerName?: string } }).draft.ownerName, "Jean");
+  } finally {
+    if (saved === undefined) delete process.env.MEETLY_HOME;
+    else process.env.MEETLY_HOME = saved;
+  }
+});
+
+test("with no name on Plow, or Plow unreachable, the owner is asked", async () => {
+  const saved = process.env.MEETLY_HOME;
+  process.env.MEETLY_HOME = tmpHome();
+  try {
+    for (const lookup of [async () => undefined, async () => "   ", async () => { throw new Error("down"); }]) {
+      const s = await statusFillingName(lookup);
+      assert.equal(s.status === "SETUP_NEEDED" && s.next, "ownerName");
+    }
+  } finally {
+    if (saved === undefined) delete process.env.MEETLY_HOME;
+    else process.env.MEETLY_HOME = saved;
+  }
+});
+
