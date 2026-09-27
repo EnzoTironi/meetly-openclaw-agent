@@ -215,14 +215,15 @@ Meetly reads your messages, so use it on an install only you talk to.
 
 ## Layout
 
-- `prompt/AGENTS.md` — the base prompt, unchanged, plus Meetly's section.
+- `prompt/AGENTS.md` — Meetly's own prompt: who it is first, then the base's
+  tool and authority rules word for word, then how Meetly works.
 - `skills/meetly-setup`, `skills/meetly-poll`, `skills/meetly-group` — what
   the agent does in setup, in the scheduled check and in a meeting group.
 - `skills/meetly/scripts/` — the TypeScript CLIs behind them.
 - `boot/` — the step before the base's boot that sets the model
   (`preboot.ts`, `llm.ts`) and the `plow-llm` command.
-- `tests/` — `node --test` suites; `tests/fixtures/base-AGENTS.md` pins the
-  base prompt to catch drift.
+- `tests/` — `node --test` suites; `tests/fixtures/base-AGENTS.md` is the
+  base prompt the tool and authority rules are checked against.
 - `index/logo.png` — the Agent Index logo (uploaded to the listing, not
   served from here).
 - `checks/` — `manual-scenarios.md` (end-to-end checklist) and `spike.md`
@@ -252,7 +253,9 @@ Pick a newer `base-<sha>` tag and its digest from the
 1. Copy that commit's `prompt/AGENTS.md` over `tests/fixtures/base-AGENTS.md`,
    and update `REV`/`TAG` in `dev/build-base.sh` and the tag in
    `compose.arm64.yml`.
-2. Re-apply the `## Meetly` section at the end of `prompt/AGENTS.md`.
+2. Diff the new base prompt against the old fixture and carry any changed
+   tool or authority rule into `prompt/AGENTS.md`; `tests/prompt.test.ts`
+   fails on a rule the base rewords.
 3. Re-check `compose.yml` and `dev/Caddyfile` against the base.
 4. Re-read the base's `plugin/index.ts` for `plow_start_thread`:
    `start-thread.ts` mirrors its `POST /v1/chats`.
