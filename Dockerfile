@@ -14,3 +14,9 @@ ENV AGENT_ID=meetly \
 
 COPY prompt/AGENTS.md /opt/plow/prompt/AGENTS.md
 COPY skills/ /opt/plow/skills/
+
+# The model: Plow's Luna by default, the owner's own OpenAI account after
+# `plow-llm openai`. Set before the base's boot, which then runs unchanged.
+COPY boot/ /opt/meetly/boot/
+COPY boot/plow-llm.sh /usr/local/bin/plow-llm
+CMD ["node", "/opt/meetly/boot/preboot.ts"]
