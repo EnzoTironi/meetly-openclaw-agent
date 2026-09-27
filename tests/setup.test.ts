@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { FIELDS, holdHours, parseField, parseTime, validateConfig, type Config } from "../skills/meetly/scripts/config.ts";
 import { finish, record } from "../skills/meetly/scripts/record-setup.ts";
-import { status, statusFillingName } from "../skills/meetly/scripts/setup-status.ts";
+import { status, statusFilling } from "../skills/meetly/scripts/setup-status.ts";
 import { readJson } from "../skills/meetly/scripts/store.ts";
 import { cli, tmpHome } from "./helpers.ts";
 
@@ -208,11 +208,11 @@ test("the owner's Plow profile name answers the first question, so setup starts 
   const saved = process.env.MEETLY_HOME;
   process.env.MEETLY_HOME = tmpHome();
   try {
-    const s = await statusFillingName(async () => "  Jean Jacintho ");
+    const s = await statusFilling({ ownerName: async () => "  Jean Jacintho " });
     assert.equal(s.status === "SETUP_NEEDED" && s.next, "timezone");
     assert.equal(s.status === "SETUP_NEEDED" && s.draft.ownerName, "Jean Jacintho");
     // Once filled it is not looked up again, and the owner can still change it.
-    const again = await statusFillingName(async () => { throw new Error("not called"); });
+    const again = await statusFilling({ ownerName: async () => { throw new Error("not called"); } });
     assert.equal(again.status === "SETUP_NEEDED" && again.next, "timezone");
     record("ownerName", "Jean");
     assert.equal(status().status === "SETUP_NEEDED" && (status() as { draft: { ownerName?: string } }).draft.ownerName, "Jean");
@@ -227,8 +227,35 @@ test("with no name on Plow, or Plow unreachable, the owner is asked", async () =
   process.env.MEETLY_HOME = tmpHome();
   try {
     for (const lookup of [async () => undefined, async () => "   ", async () => { throw new Error("down"); }]) {
-      const s = await statusFillingName(lookup);
+      const s = await statusFilling({ ownerName: lookup });
       assert.equal(s.status === "SETUP_NEEDED" && s.next, "ownerName");
+    }
+  } finally {
+    if (saved === undefined) delete process.env.MEETLY_HOME;
+    else process.env.MEETLY_HOME = saved;
+  }
+});
+
+test("the Mac's time zone answers its question right after the name, so setup starts at the days", async () => {
+  const saved = process.env.MEETLY_HOME;
+  process.env.MEETLY_HOME = tmpHome();
+  try {
+    const s = await statusFilling({ ownerName: async () => "Ana Lima", timezone: async () => "America/Sao_Paulo" });
+    assert.equal(s.status === "SETUP_NEEDED" && s.next, "days");
+    assert.deepEqual(s.status === "SETUP_NEEDED" && [s.draft.ownerName, s.draft.timezone], ["Ana Lima", "America/Sao_Paulo"]);
+  } finally {
+    if (saved === undefined) delete process.env.MEETLY_HOME;
+    else process.env.MEETLY_HOME = saved;
+  }
+});
+
+test("a Mac that cannot answer, or answers something that is not a zone, leaves the question to the owner", async () => {
+  const saved = process.env.MEETLY_HOME;
+  process.env.MEETLY_HOME = tmpHome();
+  try {
+    for (const timezone of [async () => undefined, async () => { throw new Error("no Mac"); }, async () => "Not/AZone"]) {
+      const s = await statusFilling({ ownerName: async () => "Ana", timezone });
+      assert.equal(s.status === "SETUP_NEEDED" && s.next, "timezone");
     }
   } finally {
     if (saved === undefined) delete process.env.MEETLY_HOME;
