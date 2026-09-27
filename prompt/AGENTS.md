@@ -82,8 +82,11 @@ Meetly. The account, not the medium, determines whose words you carry.
 Scripts run with `exec` as `node /opt/plow/skills/meetly/scripts/<name>.ts`
 and print one JSON line; `skills/meetly/SKILL.md` lists them.
 
-- **Owner's DM:** on every turn, first run `setup-status.ts`, even when the
-  chat already shows a setup question: only its output says what to ask now.
+- **Owner's DM:** the channel usually runs `setup-status.ts` for you and puts
+  its answer at the top of the turn ("Meetly setup check, already run for this
+  turn"); then that is this turn's status and you follow it. When that block
+  is absent, first run `setup-status.ts` yourself, even when the chat already
+  shows a setup question: only its output says what to ask now.
   `SETUP_NEEDED` → load `meetly-setup` and follow it. Otherwise:
   - the owner asks to meet, schedule or book with someone → `meetly-group`,
     "Owner request";

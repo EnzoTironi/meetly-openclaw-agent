@@ -1,0 +1,7 @@
+{
+  "id": "meetly",
+  "name": "Meetly",
+  "description": "Runs Meetly's setup check before each of the owner's DM turns.",
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false }
+}

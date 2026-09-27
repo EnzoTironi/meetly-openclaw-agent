@@ -8,11 +8,18 @@
 // model the file already names.
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { applyGate, installGate } from "./gate.ts";
 import { applyRoute, llmRoute } from "./llm.ts";
 
 const CONFIG = "/var/lib/plow/openclaw.json";
 // Loaded by path at run time: these are the base image's compiled modules.
 const load = (path: string) => import(path);
+
+try {
+  await installGate();
+} catch (error) {
+  console.error(`meetly-boot: setup gate not installed, the prompt fallback applies: ${error instanceof Error ? error.message : String(error)}`);
+}
 
 try {
   const base = process.env.PLOW_API_BASE?.replace(/\/$/, "");
@@ -29,7 +36,7 @@ try {
       const { identityFromApi } = await load("/opt/plow/boot/identity.js");
       config = renderConfig(await identityFromApi(base, process.env.PLOW_AGENT_TOKEN || "proxied"), base);
     }
-    applyRoute(config, route, base);
+    applyGate(applyRoute(config, route, base));
     await writeFile(`${CONFIG}.tmp`, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
     await rename(`${CONFIG}.tmp`, CONFIG);
     console.log(`meetly-boot: llm ${route.provider} ${route.primary}${route.fallbacks.length ? ` (fallback ${route.fallbacks.join(", ")})` : ""}`);
