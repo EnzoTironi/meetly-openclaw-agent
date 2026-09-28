@@ -141,20 +141,47 @@ or in the group):
 - **No:** clear it with `{"pendingOwner":null}`. Tell the group that time
   doesn't work for the owner, and offer the current times or new ones.
 
+`ledger.ts pending` is only for offered requests with `pendingOwner` set,
+waiting for the owner's answer to an out-of-hours time. It does not find a
+contact's open offer. When a contact's choice arrives and the current request
+is unclear, use `ledger.ts find --chat <this chat uid>` and
+`ledger.ts find --handle <contact handle>`; the handle lookup returns the
+current open (`offered`) request. Never use `pending` to look up a contact's
+offer.
+
 ## In the group
 
+- On every contact message that may answer an offer, re-read the ledger in
+  this turn before interpreting it: run `ledger.ts find --chat <this chat
+  uid>` and `ledger.ts find --handle <sender handle>`. A previous turn's
+  request object or status is stale. Use the open `offered` request for this
+  handle that is linked to this chat (or has no `chatUid` yet); do not act on
+  an older `dropped`, `expired` or `booked` request when a newer open request
+  exists. If the open handle match has no `chatUid`, link it to this chat
+  with `ledger.ts update --id <id> --json '{"chatUid":"<this chat uid>"}'`
+  before proceeding. If the lookups disagree or the open request is linked to
+  another chat, make no calendar changes and ask the owner to identify the
+  right request.
 - **No matching request:** Use this fallback only in a group that is exactly
   the owner plus one other person, after both the chat lookup and the person's
-  handle lookup found no request. In all other unmatched groups, do not take
-  Meetly action. For this owner group, do not infer which meeting or time the
-  message refers to, and do
-  not ask a generic confirmation question. Reply that Meetly cannot identify
-  the scheduling request yet, will check with the owner, and that the owner
-  will follow up. Then tell the owner in their DM that this chat has no linked
+  handle lookup found no current open (`offered`) request. A historical
+  `dropped`, `expired` or `booked` result is not a matching request. In all
+  other unmatched groups, do not take Meetly action. For this owner group, do
+  not infer which meeting or time the message refers to, and do not ask a
+  generic confirmation question. Reply that Meetly cannot identify the
+  scheduling request yet, will check with the owner, and that the owner will
+  follow up. Then tell the owner in their DM that this chat has no linked
   ledger request and include the chat uid; do not access calendar details or
   create, change, or delete holds until the request is identified.
 - **Pick** (a time, or "the first one works"):
-  1. Run `plow-gog calendar update primary <holdId> --account <account>` with
+  1. Re-run both `ledger.ts find --chat <this chat uid>` and
+     `ledger.ts find --handle <sender handle>` now, even if either command
+     already ran earlier in this turn. Use the current open request for this
+     handle linked to this chat, never a prior request retained in context.
+     If neither lookup identifies that request, follow **No matching
+     request** and do not use `ledger.ts pending` as a substitute. Select the
+     hold only from this request's `offered[]`. Then run
+     `plow-gog calendar update primary <holdId> --account <account>` with
      the final title (the topic and the person's name, without "Hold:"), the
      location, the person's email as an attendee if contacts has one, and
      `--send-updates all`. If the hold is gone, run `calendar create primary`

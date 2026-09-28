@@ -79,7 +79,10 @@ export function findOpenByHandle(ledger: Ledger, handle: string): Request | unde
 }
 
 export function findByChat(ledger: Ledger, chatUid: string): Request | undefined {
-  return ledger.requests.findLast((r) => r.chatUid === chatUid);
+  // A chat can outlive several scheduling requests. Prefer the current open
+  // offer so a recently dropped request cannot mask its replacement.
+  return ledger.requests.findLast((r) => r.chatUid === chatUid && r.status === "offered")
+    ?? ledger.requests.findLast((r) => r.chatUid === chatUid);
 }
 
 function checkOffers(offered: unknown): Offer[] {
