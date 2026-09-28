@@ -71,12 +71,17 @@ test("save replaces a duplicate open offer by normalized handle and preserves it
   assert.equal(findOpenByHandle(saved, "+15551234567")!.id, "r_1");
 });
 
-test("find by chat returns any status", () => {
+test("find by chat prefers the current offer over a dropped request for the same person", () => {
   let l = addRequest(empty(), input({ chatUid: "c1" }), T0, "r_1");
-  l = updateRequest(l, "r_1", { status: "booked" }, T0);
-  assert.equal(findByChat(l, "c1")?.id, "r_1");
+  l = updateRequest(l, "r_1", { status: "dropped" }, T0 + HOUR);
+  const nextOffer = { ...offer, start: "2026-09-29T12:30:00-03:00", end: "2026-09-29T13:00:00-03:00", holdId: "h2" };
+  l = addRequest(l, input({ handle: "5551234567", chatUid: "c1", offered: [nextOffer] }), T0 + 2 * HOUR, "r_2");
+
+  // A contact picking the second offer must operate on B and its hold, not A.
+  assert.equal(findByChat(l, "c1")?.id, "r_2");
+  assert.equal(findOpenByHandle(l, "+15551234567")?.id, "r_2");
+  assert.equal(findByChat(l, "c1")?.offered[0]?.holdId, "h2");
   assert.equal(findByChat(l, "c2"), undefined);
-  assert.equal(findOpenByHandle(l, "+15551234567"), undefined);
 });
 
 test("update resets offeredAt with new offers and rejects unknown keys", () => {
