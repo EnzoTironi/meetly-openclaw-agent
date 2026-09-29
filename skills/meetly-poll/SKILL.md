@@ -15,9 +15,10 @@ to `plow-messages`.
 To message the owner: `owner-chat.ts`, then `message` with action `send`,
 channel `plow`, accountId `chat`, target the printed `chatUid`.
 
-1. Run `setup-status.ts`. If it is not `READY`, end.
-   **Reminders** come next, even when `config.paused` is true: a link
-   already promised to someone still goes out.
+1. Run `setup-status.ts`. If it is not `READY`, or `config.paused` is true, end.
+   (Pausing disables this job, so a paused Meetly sends no reminders either.)
+   **Reminders** come first, before any messages are read, so a slow batch
+   never delays a link:
    1. Run `ledger.ts reminders`. None: go to step 2.
    2. For each request, read its event:
       `plow-gog calendar event primary <eventId> --account <booked.account> --json`.
@@ -39,7 +40,6 @@ channel `plow`, accountId `chat`, target the printed `chatUid`.
       - `no-link`: the Meet was removed from the event. Tell the owner in
         one line that no link went out for <name>'s meeting.
       - `skip`: already handled.
-   Then, if `config.paused` is true, end.
 2. Run `cursor.ts get`. If `rowid` is `null`: run `plow-messages search
    --order desc --limit 1`, then `cursor.ts set <that rowid, or 0>`, and end.
    Never scan history.

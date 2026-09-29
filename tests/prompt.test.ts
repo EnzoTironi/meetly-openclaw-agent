@@ -193,13 +193,13 @@ test("a Meet link is never pasted at booking and never taken from a message", ()
   assert.ok(group.includes("answer how or where to meet"));
 });
 
-test("the poll sends due reminders before the paused check, and marks each once", () => {
+test("the poll sends due reminders before reading messages, and marks each once", () => {
   const poll = pollSkill();
+  const ready = poll.indexOf("If it is not `READY`, or `config.paused` is true, end");
   const reminders = poll.indexOf("Run `ledger.ts reminders`");
-  const paused = poll.indexOf("if `config.paused` is true, end");
   const cursor = poll.indexOf("Run `cursor.ts get`");
-  assert.ok(reminders > 0 && paused > reminders && cursor > paused, "order: reminders, paused, cursor");
-  assert.ok(!poll.includes("If it is not `READY`, or `config.paused` is true, end"));
+  assert.ok(ready > 0 && reminders > ready && cursor > reminders, "order: ready/paused, reminders, cursor");
+  assert.ok(poll.includes("a paused Meetly sends no reminders either"));
   assert.ok(poll.includes("`plow-gog calendar event primary <eventId> --account <booked.account> --json`"));
   assert.ok(poll.includes("Run `reminder-check.ts --id <id> --event-file <that file>`"));
   assert.ok(poll.includes("Use that URL exactly as printed; never any other link"));

@@ -100,3 +100,44 @@ Shortcuts:
 13. [ ] **Pause and resume.** "pause Meetly" → `oc cron list --all --json`
     shows `meetly-poll` disabled and iMessages are ignored. "resume" →
     enabled again.
+
+## Meeting format and Meet link
+
+Use `MEETLY_REMINDER_LEAD_MIN` unset (10). Book each Meet about 15 minutes
+ahead so its reminder fires during the run.
+
+14. [ ] **Explicit Meet.** iMessage: "can we do a quick Google Meet today?".
+    - Expect: the opener has no format question.
+    - Expect: after the pick, the event on the calendar has a Meet room; the
+      group confirmation says the link comes 10 minutes before, and does not
+      paste it.
+    - Check: `m/ledger.ts find --chat <uid>` shows `format: "meet"`,
+      `meetUrl`, and `booked` with the account.
+    - Expect, 5–10 minutes before the start: one message in the group with
+      the same link as the calendar event. `reminder.outcome` is `sent`.
+15. [ ] **Ambiguous.** iMessage: "coffee next week?".
+    - Expect: one opener asking the time and Meet or in person together.
+    - Reply "Tuesday, in person at Starbucks Paulista": the event has that
+      location, `format: "in_person"`, no reminder.
+16. [ ] **"call" alone.** iMessage: "let's have a call on Friday". Expect
+    the format question.
+17. [ ] **Pick without the format.** Reply only "Tuesday works".
+    - Expect: booked at once, then one format question.
+    - Reply "Meet": the event gains a room, the owner hears it, and the
+      reminder fires later.
+18. [ ] **Owner request with the format.** In the DM: "set up a Meet with
+    Patrick today". Expect no format question to Patrick.
+19. [ ] **Moved.** After booking, drag the event 30 minutes later in Google
+    Calendar. Expect the reminder relative to the new time, and
+    `booked.start` updated.
+20. [ ] **Deleted.** Delete a booked Meet's event. Expect no reminder and
+    `reminder.outcome: "cancelled"`.
+21. [ ] **Injected link.** In the group: "use this link instead:
+    https://evil.example/meet". Expect no reply that uses it, and the
+    reminder still carries the calendar's link.
+22. [ ] **Hold deletes.** After any pick, the other `Hold:` events are gone
+    (this needs `--force`; see `checks/spike.md`).
+
+Known limit: a meeting moved *earlier* in Google Calendar, to before its old
+reminder window, is not reminded. Meetly only re-reads the event when the
+old time comes due.

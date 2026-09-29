@@ -22,9 +22,12 @@ up with you — "coffee next week?" — it:
 2. offers three free times from your Google Calendar, inside the days and
    hours you allow,
 3. holds those times on your calendar so nothing else takes them,
-4. books the one they pick, invites them if it knows their email, and
-   releases the other holds,
-5. tells you in your DM what it did.
+4. asks how you'll meet (Google Meet or in person) when the message does
+   not say it,
+5. books the one they pick, invites them if it knows their email, and
+   releases the other holds; for a Meet it creates the room,
+6. posts the Meet link in the group 10 minutes before the start,
+7. tells you in your DM what it did.
 
 It does not wait for you. If you are busy, the meeting still gets booked.
 
@@ -38,6 +41,15 @@ account; every conversation with the other person happens in the Plow group,
 signed as Meetly.
 
 ## What it will and won't do
+
+- **Asks how to meet only when it is not clear.** "A Google Meet on
+  Thursday" or "lunch at Fasano" is enough. "A call" or "coffee" with no
+  place gets one question, in the same message as the times.
+- **Posts only the Meet link it created.** The link comes from the event on
+  your calendar, read again just before it is sent: move the meeting and the
+  link goes out at the new time; delete it and nothing is sent. A link
+  someone writes in the group is never used. Pausing Meetly pauses these
+  too.
 
 - **Offers only free time, inside your hours.** Your calendar shows up as free
   slots within the days and hours you set. Anything else is "an existing
