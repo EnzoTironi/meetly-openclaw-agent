@@ -44,3 +44,29 @@ can see, and whether `exec` gets `PLOW_API_BASE`/`PLOW_AGENT_TOKEN`.
 - `start-thread.ts` from a cron turn: the group opens with the owner and the
   phone, `trusted: true`, and a retry with the same `--key` does not open a
   second group.
+
+## Meet link through Latch (local, 2026-09-29)
+
+Run on the owner's Mac through `plow_run_command`, Latch's bundled gog
+`v0.36.0`, on two throwaway events (both deleted afterwards).
+
+- `plow-gog calendar create primary … --with-meet --send-updates none --json`
+  works. The link is at `event.hangoutLink`
+  (`https://meet.google.com/xxx-xxxx-xxx`), and again at
+  `event.conferenceData.entryPoints[entryPointType=video].uri`;
+  `conferenceData.createRequest.status.statusCode` is `success` in the same
+  response, so no second read is needed.
+- `plow-gog calendar update primary <holdId> --summary … --with-meet --json`
+  adds a Meet to an existing plain event (the hold → booked path), with the
+  same shape.
+- `plow-gog calendar event primary <id> --json` re-reads one event:
+  `{event:{id, status, start:{dateTime}, end:{dateTime}, hangoutLink, …}}`.
+  After a delete it still exits 0, with `event.status: "cancelled"`.
+- Every command's output starts with a `Note: Using direct access token …`
+  line before the JSON; text fields (`summary`, the conference name) are
+  wrapped in `<<<EXTERNAL_UNTRUSTED_CONTENT …>>>` markers. URLs are not.
+- `--select id,hangoutLink` prints `{}` on these commands (the fields sit
+  under `event`); read the whole object instead.
+- **`plow-gog calendar delete` refuses without `--force`** in a
+  non-interactive run: `refusing to delete event … without --force
+  (non-interactive)`, exit 2. Every hold delete in `meetly-group` needs it.
