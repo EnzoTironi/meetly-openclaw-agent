@@ -19,8 +19,8 @@ set -eu
 
 REPO=https://github.com/plow-pbc/plow-openclaw-agent.git
 # Keep in step with the base-<sha> tag in the Dockerfile.
-REV=1e73c82c4b3e0c9f76935bc0cc45061875b34aee
-TAG=plow-openclaw-base:1e73c82-local
+REV=771198a9609dcef54d44843e7da5329c17fa51b4
+TAG=plow-openclaw-base:771198a-local
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
