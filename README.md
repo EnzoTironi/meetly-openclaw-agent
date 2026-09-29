@@ -108,7 +108,7 @@ maintenance command owns this state directory"). Build the base natively from
 source once, then add the arm64 override:
 
 ```sh
-./dev/build-base.sh                                          # tags plow-openclaw-base:1e73c82-local
+./dev/build-base.sh                                          # tags plow-openclaw-base:771198a-local
 docker compose -f compose.yml -f compose.arm64.yml up --build -d
 ```
 

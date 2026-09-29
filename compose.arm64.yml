@@ -7,4 +7,4 @@ services:
     platform: linux/arm64
     build:
       args:
-        BASE_IMAGE: plow-openclaw-base:1e73c82-local
+        BASE_IMAGE: plow-openclaw-base:771198a-local
