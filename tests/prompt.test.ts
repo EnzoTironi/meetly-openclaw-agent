@@ -144,3 +144,10 @@ test("closed request responses are limited to scheduling intent, not acknowledge
   assert.ok(group.includes("**They decline or give up:** delete the holds"));
   assert.ok(group.includes("use this only when a scheduling-related message tries to choose, change or resume the request, or asks its status"));
 });
+
+test("every calendar delete a skill names passes --force, which gog requires when it cannot prompt", () => {
+  const deletes = skillFiles.flatMap((s) =>
+    [...flat(readFileSync(s.path, "utf8")).matchAll(/`plow-gog calendar delete [^`]*`/g)].map((m) => m[0]));
+  assert.ok(deletes.length > 0);
+  for (const d of deletes) assert.ok(d.includes("--force"), `missing --force: ${d}`);
+});

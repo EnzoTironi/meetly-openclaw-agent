@@ -235,7 +235,8 @@ People in the group never can.
   event.
 - Delete only ids that the ledger records as this request's holds, never
   any other event: `plow-gog calendar delete primary <holdId> --send-updates
-  none --account <account>`.
+  none --force --account <account>`. `--force` is required: without it gog
+  refuses every delete in a non-interactive run.
 - If a delete fails, add `{holdId, account}` to the request's `holdCleanup`.
   The poll retries it.
 
