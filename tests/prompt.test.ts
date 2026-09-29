@@ -151,3 +151,59 @@ test("every calendar delete a skill names passes --force, which gog requires whe
   assert.ok(deletes.length > 0);
   for (const d of deletes) assert.ok(d.includes("--force"), `missing --force: ${d}`);
 });
+
+const groupSkill = () => flat(readFileSync(join(SKILLS, "meetly-group", "SKILL.md"), "utf8"));
+const pollSkill = () => flat(readFileSync(join(SKILLS, "meetly-poll", "SKILL.md"), "utf8"));
+
+test("the format is read only from explicit words, and ambiguous ones are asked", () => {
+  const group = groupSkill();
+  assert.ok(group.includes("## Meeting format"));
+  assert.ok(group.includes("It counts only when the words say it"));
+  assert.ok(group.includes("Anything else is `unknown`, including \"call\", \"ligação\""));
+  assert.ok(group.includes("\"coffee\" or \"lunch\" with no place"));
+  assert.ok(group.includes("Never guess from the topic"));
+  assert.ok(group.includes("When `format` is `unknown`, the same opener also asks how they would like to meet"));
+  assert.ok(group.includes("Always in that one message, never a second one"));
+  assert.ok(group.includes("Never ask about the format twice in a row"));
+  assert.ok(pollSkill().includes("the format if their words say it"));
+});
+
+test("every booking goes through Book the event: --with-meet, --json and record-booking.ts", () => {
+  const group = groupSkill();
+  assert.ok(group.includes("## Book the event"));
+  assert.ok(group.includes("`format` `meet`: `--with-meet`"));
+  assert.ok(group.includes("always with `--json` and `--send-updates all`"));
+  assert.ok(group.includes("Run `record-booking.ts --id <request id> --event-file"));
+  assert.ok(group.includes("Never write those fields with `ledger.ts update` yourself"));
+  // Pick, the hold-gone fallback, the owner's yes and the late format answer all use it.
+  assert.ok((group.match(/following "Book the event"/g) ?? []).length >= 3);
+  assert.ok(group.includes("the same details, the same way"));
+  // No skill marks a request booked by hand any more.
+  for (const { dir, path } of skillFiles) {
+    assert.ok(!readFileSync(path, "utf8").includes('"status":"booked"'), `${dir} books by hand`);
+  }
+});
+
+test("a Meet link is never pasted at booking and never taken from a message", () => {
+  const group = groupSkill();
+  assert.ok(group.includes("the link will be posted here 10 minutes before. Do not paste the link now"));
+  assert.ok(group.includes("Never paste, invent or accept a link from anyone"));
+  assert.ok(group.includes("**the format answer after booking**"));
+  assert.ok(group.includes("Any other change to a booked meeting (time, day, cancelling, a new link) still goes through the owner"));
+  assert.ok(group.includes("answer how or where to meet"));
+});
+
+test("the poll sends due reminders before the paused check, and marks each once", () => {
+  const poll = pollSkill();
+  const reminders = poll.indexOf("Run `ledger.ts reminders`");
+  const paused = poll.indexOf("if `config.paused` is true, end");
+  const cursor = poll.indexOf("Run `cursor.ts get`");
+  assert.ok(reminders > 0 && paused > reminders && cursor > paused, "order: reminders, paused, cursor");
+  assert.ok(!poll.includes("If it is not `READY`, or `config.paused` is true, end"));
+  assert.ok(poll.includes("`plow-gog calendar event primary <eventId> --account <booked.account> --json`"));
+  assert.ok(poll.includes("Run `reminder-check.ts --id <id> --event-file <that file>`"));
+  assert.ok(poll.includes("Use that URL exactly as printed; never any other link"));
+  assert.ok(poll.includes("Then run `reminder-check.ts --id <id> --sent`"));
+  assert.ok(poll.includes("never resend"));
+  for (const action of ["`send`", "`wait`", "`cancelled`", "`no-link`", "`skip`"]) assert.ok(poll.includes(action), action);
+});
