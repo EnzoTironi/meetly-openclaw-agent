@@ -5,7 +5,8 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { isMain, run } from "./cli.ts";
-import { holdHours } from "./config.ts";
+import { holdHours, reminderLeadMin } from "./config.ts";
+import { isMeetUrl } from "./event.ts";
 import { file } from "./paths.ts";
 import { readJson, updateJson } from "./store.ts";
 
@@ -16,6 +17,12 @@ export type HoldRef = { holdId: string; account: string };
 // waiting for the owner's yes or no.
 export type PendingOwner = { start: string; end: string; askedAt: string };
 export type Constraints = { days?: string[]; after?: string; before?: string; from?: string; to?: string };
+// How the meeting happens. `unknown` until the request or an answer says it.
+export type Format = "meet" | "in_person" | "phone" | "unknown";
+// The booked event's time, and the Google account it lives on.
+export type Booked = { start: string; end: string; account: string };
+// The join-time reminder was handled: sent, or not sent for good.
+export type Reminder = { at: string; outcome: "sent" | "cancelled" | "no-link" };
 
 export type Request = {
   id: string;
@@ -34,6 +41,11 @@ export type Request = {
   eventId?: string;
   holdCleanup?: HoldRef[];
   pendingOwner?: PendingOwner;
+  format?: Format;
+  locale?: string;
+  booked?: Booked;
+  meetUrl?: string;
+  reminder?: Reminder;
   offeredAt: string;
   createdAt: string;
   updatedAt: string;
@@ -41,16 +53,50 @@ export type Request = {
 
 export type Ledger = { requests: Request[] };
 
-export type NewRequest = Omit<Request, "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "offeredAt" | "createdAt" | "updatedAt">;
+export type NewRequest = Omit<Request,
+  "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "booked" | "meetUrl" | "reminder" | "offeredAt" | "createdAt" | "updatedAt">;
 export type Patch = Partial<Pick<Request,
-  "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic">> & {
+  "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic" | "format" | "locale">> & {
   pendingOwner?: PendingOwner | null;
+  booked?: Booked | null;
+  meetUrl?: string | null;
+  reminder?: Reminder | null;
 };
 
 const STATUSES: readonly Status[] = ["offered", "booked", "dropped", "expired"];
+const FORMATS: readonly Format[] = ["meet", "in_person", "phone", "unknown"];
+const OUTCOMES: readonly Reminder["outcome"][] = ["sent", "cancelled", "no-link"];
 const PATCH_KEYS = [
   "status", "chatUid", "eventId", "offered", "holdCleanup", "name", "location", "allowOverlap", "constraints", "topic", "pendingOwner",
+  "format", "locale", "booked", "meetUrl", "reminder",
 ];
+// Keys a patch can clear with null.
+const NULLABLE = ["pendingOwner", "booked", "meetUrl", "reminder"] as const;
+
+const isDate = (t: unknown) => typeof t === "string" && !Number.isNaN(Date.parse(t));
+
+function checkFormat(format: unknown): void {
+  if (!FORMATS.includes(format as Format)) throw new Error(`format must be one of ${FORMATS.join(", ")}, got ${JSON.stringify(format)}`);
+}
+
+function checkLocale(locale: unknown): void {
+  if (typeof locale !== "string" || !locale.trim() || locale.length > 35) {
+    throw new Error(`locale must be a language tag like pt-BR, got ${JSON.stringify(locale)}`);
+  }
+}
+
+function checkBooked(b: Booked): void {
+  if (!b || !isDate(b.start) || !isDate(b.end) || Date.parse(b.end) <= Date.parse(b.start)
+    || typeof b.account !== "string" || !b.account) {
+    throw new Error(`booked needs a valid start, a later end and an account: ${JSON.stringify(b)}`);
+  }
+}
+
+function checkReminder(r: Reminder): void {
+  if (!r || !isDate(r.at) || !OUTCOMES.includes(r.outcome)) {
+    throw new Error(`reminder needs a valid at and an outcome of ${OUTCOMES.join(", ")}: ${JSON.stringify(r)}`);
+  }
+}
 
 const isEmail = (h: string) => h.includes("@");
 
@@ -109,10 +155,16 @@ export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: s
   if (typeof input.topic !== "string" || !input.topic.trim()) throw new Error("topic is required");
   if (!Number.isInteger(input.durationMin) || input.durationMin <= 0) throw new Error("durationMin must be a positive whole number");
   checkOffers(input.offered);
+  const format = input.format === undefined ? "unknown" : input.format;
+  checkFormat(format);
+  if (input.locale !== undefined) checkLocale(input.locale);
   const open = findOpenByHandle(ledger, input.handle);
   if (open) throw new Error(`open request ${open.id} already exists for this person; update it instead`);
   const at = new Date(now).toISOString();
-  const request: Request = { ...input, id, status: "offered", offeredAt: at, createdAt: at, updatedAt: at };
+  // A new offer is never booked: a booking, its link and its reminder are
+  // only ever set through update, where they are validated.
+  const { booked: _b, meetUrl: _m, reminder: _r, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "reminder">>;
+  const request: Request = { ...fields, format, id, status: "offered", offeredAt: at, createdAt: at, updatedAt: at };
   return { requests: [...ledger.requests, request] };
 }
 
@@ -137,6 +189,9 @@ export function saveRequest(ledger: Ledger, input: NewRequest, now: number, id: 
     ...validated,
     id: existing.id,
     chatUid: input.chatUid ?? existing.chatUid,
+    // A new offer that does not name a format keeps the one already answered.
+    format: validated.format === "unknown" ? existing.format ?? "unknown" : validated.format,
+    locale: input.locale ?? existing.locale,
     holdCleanup,
     createdAt: existing.createdAt,
     updatedAt: new Date(now).toISOString(),
@@ -156,13 +211,27 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
       throw new Error(`pendingOwner needs valid start, end and askedAt: ${JSON.stringify(pending)}`);
     }
   }
+  if (patch.format !== undefined) checkFormat(patch.format);
+  if (patch.locale !== undefined) checkLocale(patch.locale);
+  if (patch.booked) checkBooked(patch.booked);
+  if (patch.reminder) checkReminder(patch.reminder);
+  if (patch.meetUrl !== undefined && patch.meetUrl !== null && !isMeetUrl(patch.meetUrl)) {
+    throw new Error(`meetUrl must be a Google Meet link (https://meet.google.com/xxx-xxxx-xxx), got ${JSON.stringify(patch.meetUrl)}`);
+  }
   const index = ledger.requests.findIndex((r) => r.id === id);
   if (index < 0) throw new Error(`no request ${id}`);
   const at = new Date(now).toISOString();
-  const { pendingOwner, ...rest } = patch;
-  const updated: Request = { ...ledger.requests[index]!, ...rest, updatedAt: at };
-  if (pendingOwner === null) delete updated.pendingOwner;
-  else if (pendingOwner !== undefined) updated.pendingOwner = pendingOwner;
+  const updated: Request = { ...ledger.requests[index]!, updatedAt: at };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null && (NULLABLE as readonly string[]).includes(key)) delete updated[key as (typeof NULLABLE)[number]];
+    else if (value !== undefined) (updated as Record<string, unknown>)[key] = value;
+  }
+  // A link belongs to a Meet: moving to another format drops it, and a link
+  // is never set on a meeting that is not one.
+  if (updated.meetUrl !== undefined && updated.format !== "meet") {
+    if (patch.meetUrl) throw new Error(`meetUrl is only for a meeting with format meet (this one is ${updated.format ?? "unknown"})`);
+    delete updated.meetUrl;
+  }
   if (patch.offered !== undefined) updated.offeredAt = at;
   const requests = [...ledger.requests];
   requests[index] = updated;
@@ -176,6 +245,16 @@ export function expiredRequests(ledger: Ledger, hours: number, now: number): Req
 // Open requests waiting for the owner to confirm an out-of-hours time.
 export function pendingOwnerList(ledger: Ledger): Request[] {
   return ledger.requests.filter((r) => r.status === "offered" && r.pendingOwner !== undefined);
+}
+
+// Booked Meets whose link is due in the group: from `leadMin` before the
+// start until `graceMin` after it, once.
+export function dueReminders(ledger: Ledger, now: number, leadMin: number, graceMin = 5): Request[] {
+  return ledger.requests.filter((r) => {
+    if (r.status !== "booked" || r.format !== "meet" || !r.meetUrl || !r.booked || r.reminder) return false;
+    const start = Date.parse(r.booked.start);
+    return now >= start - leadMin * 60_000 && now < start + graceMin * 60_000;
+  });
 }
 
 export function cleanupList(ledger: Ledger): Request[] {
@@ -204,6 +283,7 @@ if (isMain(import.meta.url)) {
         json: { type: "string" },
         "json-file": { type: "string" },
         hours: { type: "string" },
+        "lead-min": { type: "string" },
       },
     });
     const path = file("ledger.json");
@@ -242,8 +322,13 @@ if (isMain(import.meta.url)) {
         return { requests: pendingOwnerList(readJson<Ledger>(path, EMPTY)) };
       case "cleanup":
         return { requests: cleanupList(readJson<Ledger>(path, EMPTY)).map((r) => ({ id: r.id, holdCleanup: r.holdCleanup })) };
+      case "reminders": {
+        const lead = values["lead-min"] !== undefined ? Number(values["lead-min"]) : reminderLeadMin();
+        if (!Number.isFinite(lead) || lead <= 0) throw new Error(`--lead-min must be a number > 0, got ${values["lead-min"]}`);
+        return { requests: dueReminders(readJson<Ledger>(path, EMPTY), now, lead) };
+      }
       default:
-        throw new Error("usage: ledger.ts find | add | update | expired | pending | cleanup");
+        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | cleanup | reminders");
     }
   });
 }

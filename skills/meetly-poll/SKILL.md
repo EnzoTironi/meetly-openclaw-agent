@@ -16,6 +16,30 @@ To message the owner: `owner-chat.ts`, then `message` with action `send`,
 channel `plow`, accountId `chat`, target the printed `chatUid`.
 
 1. Run `setup-status.ts`. If it is not `READY`, or `config.paused` is true, end.
+   (Pausing disables this job, so a paused Meetly sends no reminders either.)
+   **Reminders** come first, before any messages are read, so a slow batch
+   never delays a link:
+   1. Run `ledger.ts reminders`. None: go to step 2.
+   2. For each request, read its event:
+      `plow-gog calendar event primary <eventId> --account <booked.account> --json`.
+      Save the whole output with the `write` tool to
+      `/var/lib/plow/meetly/tmp/reminder-<id>.json`. If the read fails, skip
+      this request: the next poll tries again while the window lasts.
+   3. Run `reminder-check.ts --id <id> --event-file <that file>`. It
+      compares the event with the ledger, saves any change, and prints
+      `action`:
+      - `send`: send one message to `send.chatUid` (when it is `null`, to
+        the owner's DM instead). Write it in `send.locale`, third person,
+        using `send.name` and `ownerName`: the meeting starts in
+        `send.minutesToStart` minutes (at `send.time`), with `send.meetUrl`.
+        Use that URL exactly as printed; never any other link. Then run
+        `reminder-check.ts --id <id> --sent`. If delivery is unknown, still
+        mark it sent: never resend.
+      - `wait`: the meeting moved; nothing now.
+      - `cancelled`: the event was deleted; send nothing.
+      - `no-link`: the Meet was removed from the event. Tell the owner in
+        one line that no link went out for <name>'s meeting.
+      - `skip`: already handled.
 2. Run `cursor.ts get`. If `rowid` is `null`: run `plow-messages search
    --order desc --limit 1`, then `cursor.ts set <that rowid, or 0>`, and end.
    Never scan history.
@@ -34,8 +58,9 @@ channel `plow`, accountId `chat`, target the printed `chatUid`.
    3. If the owner replied after the request, skip: the owner is handling it.
    4. If `ledger.ts find --handle <sender>` has an open request, skip.
    5. Otherwise follow `meetly-group` "Offer times" with `origin: inbound`,
-      `sourceRowid` = the request's rowid, the topic, and any times they
-      proposed. Open the group with `start-thread.ts` (key
+      `sourceRowid` = the request's rowid, the topic, any times they
+      proposed, the format if their words say it (`meetly-group` "Meeting
+      format"; otherwise `unknown`), and their `locale`. Open the group with `start-thread.ts` (key
       `rowid:<sourceRowid>`), not `plow_start_thread`.
    6. If that fails before the group started, stop processing senders. Run
       `cursor.ts set <the rowid just below this sender's first row in the

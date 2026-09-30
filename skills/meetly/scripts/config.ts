@@ -44,6 +44,12 @@ export function holdHours(): number {
   return Number.isFinite(n) && n > 0 ? n : 48;
 }
 
+// How many minutes before a Meet its link is posted in the group.
+export function reminderLeadMin(): number {
+  const n = Number(process.env.MEETLY_REMINDER_LEAD_MIN || NaN);
+  return Number.isFinite(n) && n > 0 ? n : 10;
+}
+
 export function isField(name: string): name is Field {
   return (FIELDS as readonly string[]).includes(name);
 }
