@@ -1,9 +1,14 @@
-// Turns `plow-gog calendar events` output into busy intervals. Anything the
+// Turns `plow-gog calendar events` output into busy intervals, from files or,
+// with --fetch, read straight from the Mac into tmp/busy.json. Anything the
 // read did not cover (a truncated listing, an account at --max, a degraded
 // account) is reported, never treated as free.
 import { parseArgs } from "node:util";
 import { isMain, readInput, run } from "./cli.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, type Config } from "./config.ts";
+import { runOnMac, type BridgeOptions } from "./mac.ts";
+import { file } from "./paths.ts";
+import { status } from "./setup-status.ts";
+import { writeJson } from "./store.ts";
 import { zonedToUtc } from "./time.ts";
 
 export type Busy = { start: string; end: string; id?: string; account?: string };
@@ -99,11 +104,66 @@ export function toBusy(results: unknown[], opts: { tz: string; max: number }): B
   return out;
 }
 
+// The listing after any notice plow-gog prints ahead of it ("Note: Using
+// direct access token ..."): from the first line that opens the JSON.
+function listingOf(output: string): unknown {
+  const start = output.search(/^[[{]/m);
+  if (start < 0) throw new Error("no JSON in the calendar listing");
+  return JSON.parse(output.slice(start));
+}
+
+const FETCH_MAX = 100;
+
+// Reads every configured account on the Mac directly (mac.ts), one
+// `plow-gog calendar events` per account, so the listing never passes through
+// the model. An account the Mac cannot read, or whose listing does not parse,
+// is degraded.
+export async function fetchBusy(
+  config: Pick<Config, "timezone" | "calendars">,
+  range: { from: string; to: string },
+  opts: BridgeOptions = {},
+): Promise<BusyResult> {
+  const byAccount = new Map<string, string[]>();
+  for (const c of config.calendars) byAccount.set(c.account, [...(byAccount.get(c.account) ?? []), c.id]);
+  const results: unknown[] = [];
+  const degraded: string[] = [];
+  for (const [account, ids] of byAccount) {
+    const output = await runOnMac({
+      argv: ["plow-gog", "calendar", "events", "--calendars", ids.join(","), "--account", account,
+        "--from", range.from, "--to", range.to, "--max", String(FETCH_MAX), "--json"],
+      readPaths: [], timeoutMs: 60_000,
+      goal: "Meetly: read your busy times so it only offers times you are free",
+    }, opts).catch(() => undefined);
+    let events: CalEvent[];
+    try {
+      if (output === undefined) throw new Error("unreadable");
+      events = eventsOf(listingOf(output)).events;
+    } catch {
+      degraded.push(account);
+      continue;
+    }
+    results.push({ events: events.map((e) => ({ ...e, account })) });
+  }
+  const out = toBusy(results, { tz: config.timezone, max: FETCH_MAX });
+  out.degraded.push(...degraded);
+  return out;
+}
+
 if (isMain(import.meta.url)) {
-  run(() => {
+  run(async () => {
     const { values } = parseArgs({
-      options: { in: { type: "string", multiple: true }, max: { type: "string", default: "100" } },
+      options: { in: { type: "string", multiple: true }, max: { type: "string", default: "100" }, fetch: { type: "boolean", default: false } },
     });
+    if (values.fetch) {
+      const current = status();
+      if (current.status !== "READY") throw new Error("Meetly is not set up yet");
+      const result = await fetchBusy(current.config, current.range);
+      const out = file("tmp/busy.json");
+      writeJson(out, result);
+      const summary: { file: string; busy: number; degraded: string[]; unknownAfter?: string } = { file: out, busy: result.busy.length, degraded: result.degraded };
+      if (result.unknownAfter) summary.unknownAfter = result.unknownAfter;
+      return summary;
+    }
     const max = Number(values.max);
     if (!Number.isInteger(max) || max <= 0) throw new Error(`--max must be a positive whole number, got ${values.max}`);
     const { timezone } = loadConfig();
