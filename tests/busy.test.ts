@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { instant, toBusy } from "../skills/meetly/scripts/busy.ts";
+import { fetchBusy, instant, toBusy } from "../skills/meetly/scripts/busy.ts";
 import { writeJson } from "../skills/meetly/scripts/store.ts";
 import { cli, tmpHome } from "./helpers.ts";
 
@@ -82,4 +82,60 @@ test("the CLI merges several files using the configured zone", () => {
   assert.equal(stdin.json.busy.length, 2);
   const noSetup = cli("busy.ts", ["--in", join(FIX, "fanout.json")], { MEETLY_HOME: tmpHome() });
   assert.equal(noSetup.status, 1);
+});
+
+type Call = { argv: string[] };
+function macBridge(reply: (argv: string[]) => string | undefined, calls: Call[] = []): typeof fetch {
+  return (async (_url: string | URL | Request, init?: RequestInit) => {
+    const argv = JSON.parse(String(init?.body)).params.arguments.argv as string[];
+    calls.push({ argv });
+    const output = reply(argv);
+    const out = output === undefined ? { exit_code: 1, output: "gog: 401" } : { exit_code: 0, output };
+    const result = { content: [{ type: "text", text: JSON.stringify(out) }] };
+    return new Response(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result })}\n\n`);
+  }) as typeof fetch;
+}
+
+const range = { from: "2026-09-30T13:36:05-03:00", to: "2026-10-04T13:36:05-03:00" };
+const gogEvent = (id: string, start: string, end: string) =>
+  ({ id, CalendarID: "owner@example.com", start: { dateTime: start }, end: { dateTime: end }, startLocal: start, endLocal: end, status: "confirmed" });
+
+test("fetchBusy reads each account on the Mac itself, so no calendar JSON passes through the model", async () => {
+  const calls: Call[] = [];
+  const listing = JSON.stringify({ events: [gogEvent("e1", "2026-10-01T12:30:00-03:00", "2026-10-01T13:00:00-03:00")], nextPageTokens: [] }, null, 2);
+  const r = await fetchBusy({
+    timezone: TZ,
+    calendars: [{ account: "owner@example.com", id: "owner@example.com" }, { account: "owner@example.com", id: "team@group.calendar.google.com" }, { account: "work@example.com", id: "work@example.com" }],
+  }, range, { token: "tok", fetch: macBridge(() => `Note: Using direct access token (expires in ~1 hour; no auto-refresh)\n${listing}\n`, calls) });
+  assert.deepEqual(calls.map((c) => c.argv), [
+    ["plow-gog", "calendar", "events", "--calendars", "owner@example.com,team@group.calendar.google.com", "--account", "owner@example.com", "--from", range.from, "--to", range.to, "--max", "100", "--json"],
+    ["plow-gog", "calendar", "events", "--calendars", "work@example.com", "--account", "work@example.com", "--from", range.from, "--to", range.to, "--max", "100", "--json"],
+  ]);
+  assert.deepEqual(r.degraded, []);
+  assert.deepEqual(r.busy.map((b) => [b.id, b.account, b.start]), [
+    ["e1", "owner@example.com", "2026-10-01T15:30:00.000Z"],
+    ["e1", "work@example.com", "2026-10-01T15:30:00.000Z"],
+  ]);
+});
+
+test("fetchBusy reports an account it could not read as degraded, never as free", async () => {
+  const r = await fetchBusy({
+    timezone: TZ,
+    calendars: [{ account: "owner@example.com", id: "owner@example.com" }, { account: "work@example.com", id: "work@example.com" }],
+  }, range, { token: "tok", fetch: macBridge((argv) => argv.includes("work@example.com") ? undefined : '{"events": []}') });
+  assert.deepEqual(r, { busy: [], degraded: ["work@example.com"] });
+  const noMac = await fetchBusy({ timezone: TZ, calendars: [{ account: "owner@example.com", id: "owner@example.com" }] }, range, { token: "" });
+  assert.deepEqual(noMac.degraded, ["owner@example.com"]);
+});
+
+test("the CLI's --fetch writes tmp/busy.json for slots.ts and prints only a short summary", () => {
+  const home = tmpHome();
+  writeJson(join(home, "config.json"), {
+    ownerName: "Ana", timezone: TZ, days: ["mon"], windowStart: "09:00", windowEnd: "17:00", durationMin: 30, horizonDays: 3,
+    calendars: [{ account: "owner@example.com", id: "owner@example.com" }], defaultAccount: "owner@example.com", setupDoneAt: "2026-09-26T00:00:00Z",
+  });
+  const r = cli("busy.ts", ["--fetch"], { MEETLY_HOME: home, PLOW_MCP_BRIDGE_TOKEN: "" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.json, { file: join(home, "tmp", "busy.json"), busy: 0, degraded: ["owner@example.com"] });
+  assert.deepEqual(JSON.parse(readFileSync(join(home, "tmp", "busy.json"), "utf8")), { busy: [], degraded: ["owner@example.com"] });
 });

@@ -18,12 +18,12 @@ their chat uid from `owner-chat.ts`.
 
 ## Read the calendar
 
-1. Take `config` and `range` from `setup-status.ts`.
-2. For each account in `config.calendars` (grouped by account), run
-   `plow-gog calendar events --calendars <ids, comma-separated> --account <account> --from <range.from> --to <range.to> --max 100 --json`.
-3. Save each result with the `write` tool to
-   `/var/lib/plow/meetly/tmp/events-<n>.json`. Then run `busy.ts --in … --in …`
-   and write its output to `/var/lib/plow/meetly/tmp/busy.json`.
+Run `busy.ts --fetch`. It reads every calendar in the config on the Mac
+itself and writes `/var/lib/plow/meetly/tmp/busy.json`; it prints only
+`{file, busy, degraded, unknownAfter?}`. Never run `plow-gog calendar events`
+yourself or copy a calendar listing into a file. An account in `degraded`
+could not be read: `slots.ts` reports it, and you never claim the owner is
+free there.
 
 ## Offer times
 
