@@ -27,11 +27,13 @@ free there.
 
 ## Offer times
 
-1. Resolve the person with `contacts`: name and every phone (E.164) and
-   email. For an inbound request, their handle is the one they wrote from.
-   For an owner request, run `reachable-handle.ts --handle <each phone and
-   email>` and use the `handle` it returns: the one the owner reaches them on
-   over iMessage.
+1. Resolve the person. For an inbound request, run `contact.ts --handle
+   <the handle they wrote from>`: that handle is theirs, and `name` is their
+   name (when `found` is false, or `name` is null, go on with the handle; a
+   missing card never stops the request). For an owner request, resolve them
+   with `contacts`: name and every phone (E.164) and email; then run
+   `reachable-handle.ts --handle <each phone and email>` and use the `handle`
+   it returns: the one the owner reaches them on over iMessage.
    - `reason: "not-on-imessage"`: tell the owner in one line that <name> is
      not on iMessage at any of their numbers or emails, so Meetly cannot reach
      them, then stop.

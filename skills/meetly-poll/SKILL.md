@@ -57,12 +57,18 @@ channel `plow`, accountId `chat`, target the printed `chatUid`.
       and anything unclear.
    3. If the owner replied after the request, skip: the owner is handling it.
    4. If `ledger.ts find --handle <sender>` has an open request, skip.
-   5. Otherwise follow `meetly-group` "Offer times" with `origin: inbound`,
+   5. Run `cursor.ts hold <the request's rowid>` (the same rowid you pass as
+      `sourceRowid`) before anything else. Until the ledger records a request
+      with that `sourceRowid`, `cursor.ts set` stops just below it, so a run
+      that fails part-way retries it.
+      If you decide after all that it is not a request, run `cursor.ts
+      release`.
+   6. Follow `meetly-group` "Offer times" with `origin: inbound`,
       `sourceRowid` = the request's rowid, the topic, any times they
       proposed, the format if their words say it (`meetly-group` "Meeting
       format"; otherwise `unknown`), and their `locale`. Open the group with `start-thread.ts` (key
       `rowid:<sourceRowid>`), not `plow_start_thread`.
-   6. If that fails before the group started, stop processing senders. Run
+   7. If that fails before the group started, stop processing senders. Run
       `cursor.ts set <the rowid just below this sender's first row in the
       batch>` and go to step 6.
 5. Run `cursor.ts set <highest rowid in the batch>`.

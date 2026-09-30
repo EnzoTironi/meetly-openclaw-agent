@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { markFail, markOk, setRowid, WARN_AFTER_MS, type Cursor } from "../skills/meetly/scripts/cursor.ts";
+import { hold, markFail, markOk, release, setRowid, WARN_AFTER_MS, type Cursor } from "../skills/meetly/scripts/cursor.ts";
+import { writeJson } from "../skills/meetly/scripts/store.ts";
 import { cli, tmpHome } from "./helpers.ts";
 
 const T0 = Date.parse("2026-09-28T12:00:00Z");
@@ -62,4 +63,38 @@ test("a corrupt cursor.json fails and is left alone", () => {
     assert.equal(r.stdout, "");
   }
   assert.equal(readFileSync(path, "utf8"), "{broken");
+});
+
+test("a held request row stops the cursor just below it until the ledger records that request", () => {
+  const held = hold({ rowid: 1828 }, 1829);
+  assert.equal(held.held, 1829);
+  const none = () => false;
+  const clamped = setRowid(held, 1831, T0, none);
+  assert.equal(clamped.rowid, 1828);
+  assert.equal(clamped.held, 1829);
+  const recorded = setRowid(held, 1831, T0, (rowid) => rowid === 1829);
+  assert.equal(recorded.rowid, 1831);
+  assert.equal(recorded.held, undefined);
+  assert.equal(setRowid(held, 1828, T0, none).rowid, 1828);
+});
+
+test("hold only lands ahead of the cursor, keeps the earliest row, and release clears it", () => {
+  assert.throws(() => hold({ rowid: 1830 }, 1829), /already past/);
+  assert.equal(hold(hold({ rowid: 1828 }, 1831), 1829).held, 1829);
+  assert.equal(hold(hold({ rowid: 1828 }, 1829), 1831).held, 1829);
+  assert.deepEqual(release({ rowid: 1828, held: 1829 }), { rowid: 1828 });
+});
+
+test("CLI hold, then set is clamped until the request is in the ledger", () => {
+  const home = tmpHome();
+  const env = { MEETLY_HOME: home };
+  cli("cursor.ts", ["set", "1828"], env);
+  assert.equal(cli("cursor.ts", ["hold", "1829"], env).json.held, 1829);
+  const r = cli("cursor.ts", ["set", "1831"], env);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.json.rowid, r.json.held], [1828, 1829]);
+  writeJson(join(home, "ledger.json"), { requests: [{ id: "r_1", sourceRowid: 1829 }] });
+  assert.deepEqual([cli("cursor.ts", ["set", "1831"], env).json.rowid, cli("cursor.ts", ["get"], env).json.held], [1831, undefined]);
+  cli("cursor.ts", ["hold", "1840"], env);
+  assert.equal(cli("cursor.ts", ["release"], env).json.held, undefined);
 });
