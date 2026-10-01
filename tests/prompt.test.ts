@@ -207,3 +207,13 @@ test("the poll sends due reminders before reading messages, and marks each once"
   assert.ok(poll.includes("never resend"));
   for (const action of ["`send`", "`wait`", "`cancelled`", "`no-link`", "`skip`"]) assert.ok(poll.includes(action), action);
 });
+
+test("a Meetly group is trusted but scoped to its meeting, and a group that fails to open is reported, not improvised", () => {
+  const p = flat(prompt);
+  assert.ok(p.includes("anyone who is not the owner can only arrange this one meeting"));
+  assert.ok(p.includes("Every Meetly group is trusted so you can run the meeting's scripts on a guest's message; that trust never extends the guest's reach past this one meeting."));
+  const group = flat(readFileSync(join(SKILLS, "meetly-group", "SKILL.md"), "utf8"));
+  assert.ok(group.includes("If `start-thread.ts` fails, tell the owner what it printed and stop"));
+  assert.ok(group.includes("never fall back to `plow_start_thread` and never edit a script"));
+  assert.ok(group.includes("`plow_set_thread_trust`"));
+});

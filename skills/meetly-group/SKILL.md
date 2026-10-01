@@ -82,9 +82,15 @@ free there.
      like to meet: Google Meet or in person. When it is `in_person` with no
      `location`, it asks where. Always in that one message, never a second
      one.
-   - If starting the group fails, delete the new holds and mark the saved
-     request `dropped`; if a hold cannot be deleted, record its id and account
-     in `holdCleanup` so cleanup can retry. Tell the owner what failed.
+   - If `start-thread.ts` fails, tell the owner what it printed and stop:
+     never fall back to `plow_start_thread` and never edit a script. Delete
+     the new holds and mark the saved request `dropped`; if a hold cannot be
+     deleted, record its id and account in `holdCleanup` so cleanup can retry.
+   - A group the owner opened as a normal (untrusted) chat cannot run
+     Meetly: every guest reply there can only be passed to the owner. When
+     the owner asks Meetly to handle such a group, ask them to make it
+     trusted and, on their yes, run `plow_set_thread_trust` with that chat uid
+     and `trusted: true`.
    - If delivery is unknown (`deliveryUnknown`), continue without `chatUid`
      and tell the owner. Never resend.
    - After a group opens, run `ledger.ts update --id <saved request id>
