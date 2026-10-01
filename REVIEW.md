@@ -27,20 +27,21 @@ Subtractive remedies outrank additive ones. Four gates here can be checked
 directly, and they come ahead of anything else:
 
 - **Guests cannot widen what Meetly does.** Every group is trusted
-  (`PLOW_THREAD_TRUST=trusted`), so the scripts are the only boundary between
-  a guest's text and the owner's calendar. Free time only inside the owner's
-  hours. A conflict or an out-of-hours time is unlocked only by the owner.
-  Event names and details never reach the group (they become "an existing
-  commitment"). Block any change that moves one of these checks out of a
-  script and into the prompt, or that lets a group message satisfy it.
+  (`PLOW_THREAD_TRUST=trusted`), so the boundary between a guest's text and
+  the owner's calendar has two halves. The scripts (`slots.ts`) compute
+  which times are free, busy or outside the owner's hours. The prompt
+  (`prompt/AGENTS.md`, `meetly-group`) decides who may override that: only
+  the owner unlocks a conflict or an out-of-hours time, and event names and
+  details never reach the group (they become "an existing commitment").
+  Review both halves. Block a change that lets a group message pass
+  `--confirm-conflict` or an overlap, or that weakens either half.
 - **Deterministic work lives in scripts, not the model.** Reading the
   calendar, matching contacts, the ledger state and the poll cursor already
   moved into `skills/meetly/scripts/` (#31, #32). Flag new logic that has a
   single correct answer and is placed in a skill's prose instead.
 - **Calendar writes are owned and reversible.** A hold expires after 48 hours,
-  booking releases the other holds, and a cancel or move updates the ledger
-  and tells the group. Block a write path that leaves a hold or a ledger row
-  with no way out. Meetly never sends from the owner's own Messages account.
+  and booking releases the other holds. Block a write path that leaves a
+  hold or a ledger row with no way out. Meetly never sends from the owner's own Messages account.
 - **Pins are the supply chain.** The base `FROM` carries a digest. Binaries
   fetched at build carry a version and a sha256. Block a move to a mutable
   ref. Bumping a pin to a new immutable revision is ordinary work, not a
