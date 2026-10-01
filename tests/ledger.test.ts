@@ -211,9 +211,11 @@ test("a corrupt ledger.json fails loudly", () => {
 
 test("an owner cancellation finds the booked request by its event id and closes it as cancelled", () => {
   let l = addRequest(empty(), input({ chatUid: "c1" }), T0, "r_1");
-  l = updateRequest(l, "r_1", { status: "booked", eventId: "ev_1" }, T0);
-  assert.equal(findByEvent(l, "ev_1")?.id, "r_1");
-  assert.equal(findByEvent(l, "ev_other"), undefined);
+  l = updateRequest(l, "r_1", { status: "booked", eventId: "ev_1", booked: { start: offer.start, end: offer.end, account: "a@example.com" } }, T0);
+  assert.equal(findByEvent(l, "ev_1", "a@example.com")?.id, "r_1");
+  assert.equal(findByEvent(l, "ev_other", "a@example.com"), undefined);
+  // The same id on another account is another event: never this request.
+  assert.equal(findByEvent(l, "ev_1", "b@example.com"), undefined);
   l = updateRequest(l, "r_1", { status: "cancelled" }, T0 + HOUR);
   assert.equal(l.requests[0]!.status, "cancelled");
   // A cancelled meeting is closed: no reminder, no expiry, and it frees the person for a new offer.
@@ -226,8 +228,10 @@ test("CLI find --event returns the request booked as that event", () => {
   const env = { MEETLY_HOME: tmpHome() };
   const id = cli("ledger.ts", ["add", "--json", JSON.stringify(input({ chatUid: "c1" }))], env).json.request.id;
   cli("ledger.ts", ["update", "--id", id, "--json", '{"status":"booked","eventId":"ev_1"}'], env);
-  assert.equal(cli("ledger.ts", ["find", "--event", "ev_1"], env).json.request.id, id);
-  assert.deepEqual(cli("ledger.ts", ["find", "--event", "ev_2"], env).json, { request: null });
+  // A booking recorded before `booked` existed has no account: its event id alone identifies it.
+  assert.equal(cli("ledger.ts", ["find", "--event", "ev_1", "--account", "a@example.com"], env).json.request.id, id);
+  assert.deepEqual(cli("ledger.ts", ["find", "--event", "ev_2", "--account", "a@example.com"], env).json, { request: null });
+  assert.notEqual(cli("ledger.ts", ["find", "--event", "ev_1"], env).status, 0, "--event needs --account");
   const cancelled = cli("ledger.ts", ["update", "--id", id, "--json", '{"status":"cancelled"}'], env);
   assert.equal(cancelled.status, 0, cancelled.stderr);
   assert.equal(cancelled.json.request.status, "cancelled");

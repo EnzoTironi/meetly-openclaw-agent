@@ -21,7 +21,8 @@ their chat uid from `owner-chat.ts`.
 Run `busy.ts --fetch`. It reads every calendar in the config on the Mac
 itself and writes `/var/lib/plow/meetly/tmp/busy.json`; it prints only
 `{file, busy, degraded, unknownAfter?}`. Never run `plow-gog calendar events`
-yourself or copy a calendar listing into a file. An account in `degraded`
+yourself or copy a calendar listing into a file; the one exception is "Owner
+cancels or moves". An account in `degraded`
 could not be read: `slots.ts` reports it, and you never claim the owner is
 free there.
 
@@ -123,17 +124,20 @@ In the owner's DM:
 In the owner's DM, when the owner cancels, moves or clears time ("cancel my
 lunch with Ana", "remove all my appointments today", "move the call to 3pm"):
 
-1. Read the affected events from the calendar. For each one, run `ledger.ts
-   find --event <event id>`. An event with no request (or one whose request
-   is not `booked`) is not a Meetly meeting: handle it as the owner asked and
-   tell no one.
+1. Read the affected events with `plow-gog calendar events` for the owner's
+   range, so each comes with its title, id and account. This is the one place
+   Meetly reads event titles, and only in the owner's own DM, to match their
+   words; nothing from it goes to anyone else. For each event, run `ledger.ts
+   find --event <event id> --account <its account>`. An event with no request
+   (or one whose request is not `booked`) is not a Meetly meeting: handle it
+   as the owner asked and tell no one.
 2. Act on the owner's words. Their own instruction that covers the meeting
    ("all", "everything today", the person's name) is the approval: do not ask
    again. Ask once only when the words truly leave it open which meetings
    are meant. When the owner repeats the instruction instead of answering,
    that is the yes.
-3. For each booked request, with `<account>` = `booked.account`, or
-   `config.defaultAccount` when it has none:
+3. For each booked request, with `<account>` = the account the event was
+   read from:
    - **Cancel:** `plow-gog calendar delete primary <eventId> --send-updates
      all --force --account <account>`. Then `ledger.ts update --id <id>
      --json '{"status":"cancelled","pendingOwner":null}'`.
