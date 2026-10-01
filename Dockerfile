@@ -7,10 +7,15 @@
 ARG BASE_IMAGE=public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-771198a9609dcef54d44843e7da5329c17fa51b4@sha256:f1e7c421b97a80f1bd17015f96daceb965f350a241f7edc7e4d856a0e3a6f8f5
 FROM ${BASE_IMAGE}
 
+# Every Meetly group is trusted: a guest's reply must reach the ledger and
+# calendar scripts, and an untrusted group lets it only ask the owner. The
+# base's default ("ask") would also have the model ask the owner which kind
+# of group to open. AGENTS.md limits what a guest can have done.
 ENV AGENT_ID=meetly \
     AGENT_NAME=Meetly \
     AGENT_BLURB="Your scheduling assistant. It reads your iMessages, spots who wants to meet, and opens a group to book it on your calendar. Or ask it to reach out to anyone for you. Works both ways." \
-    AGENT_RUNTIME="OpenClaw 2.0"
+    AGENT_RUNTIME="OpenClaw 2.0" \
+    PLOW_THREAD_TRUST=trusted
 
 COPY prompt/AGENTS.md /opt/plow/prompt/AGENTS.md
 COPY skills/ /opt/plow/skills/
