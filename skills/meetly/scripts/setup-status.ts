@@ -4,14 +4,16 @@ import { isMain, run } from "./cli.ts";
 import { nextField, QUESTIONS, readableCalendars, type Config, type Field } from "./config.ts";
 import { ownerDisplayName } from "./owner-chat.ts";
 import { macTimezone } from "./mac-timezone.ts";
+import { LATCH_ABOUT_URL, LATCH_DOWNLOAD_URL, macConnected } from "./mac.ts";
 import { record } from "./record-setup.ts";
 import { file } from "./paths.ts";
 import { readJson } from "./store.ts";
 import { localIso } from "./time.ts";
 
+export type MacStatus = { connected: true } | { connected: false; download: string; about: string };
 export type Status =
   | { status: "READY"; config: Config; range: { from: string; to: string } }
-  | { status: "SETUP_NEEDED"; next: Field | null; question: string | null; draft: Partial<Config> };
+  | { status: "SETUP_NEEDED"; next: Field | null; question: string | null; draft: Partial<Config>; mac?: MacStatus };
 
 export function status(now: number = Date.now()): Status {
   const stored = readJson<Config | null>(file("config.json"), null);
@@ -30,9 +32,26 @@ export function status(now: number = Date.now()): Status {
 // their Plow profile, and their time zone is the one their Mac is set to; each
 // fills its question when setup reaches it, and is asked only when that source
 // has no answer or cannot be reached. The owner can change either afterwards.
-export type Lookups = { ownerName?: () => Promise<string | undefined>; timezone?: () => Promise<string | undefined> };
+//
+// The two questions that need the Mac, the time zone when the Mac did not
+// answer it and the calendars, also say whether the Mac is connected, with
+// where to get Plow Latch when it is not: without it there is nothing to read.
+export type Lookups = {
+  ownerName?: () => Promise<string | undefined>;
+  timezone?: () => Promise<string | undefined>;
+  mac?: () => Promise<boolean>;
+};
 
-export async function statusFilling(lookups: Lookups = { ownerName: ownerDisplayName, timezone: macTimezone }, now: number = Date.now()): Promise<Status> {
+const NEEDS_MAC: readonly (Field | null)[] = ["timezone", "calendars"];
+
+export async function statusFilling(lookups: Lookups = { ownerName: ownerDisplayName, timezone: macTimezone, mac: macConnected }, now: number = Date.now()): Promise<Status> {
+  const current = await filled(lookups, now);
+  if (current.status !== "SETUP_NEEDED" || !NEEDS_MAC.includes(current.next) || !lookups.mac) return current;
+  const connected = await lookups.mac().catch(() => false);
+  return { ...current, mac: connected ? { connected: true } : { connected: false, download: LATCH_DOWNLOAD_URL, about: LATCH_ABOUT_URL } };
+}
+
+async function filled(lookups: Lookups, now: number): Promise<Status> {
   for (;;) {
     const current = status(now);
     if (current.status !== "SETUP_NEEDED" || !current.next) return current;

@@ -67,3 +67,22 @@ test("preboot enables the gate with conversation access and replaces the volume'
   assert.equal(await readFile(join(target, "index.js"), "utf8"), await readFile(join(import.meta.dirname, "..", "plugin", "index.js"), "utf8"));
   assert.ok(JSON.parse(await readFile(join(target, "openclaw.plugin.json"), "utf8")).id === "meetly");
 });
+
+const LATCH = { connected: false, download: "https://plow.co/download/latch", about: "https://plow.co/latch" };
+
+test("with no Mac at the calendars question the gate explains Plow Latch with its link instead of asking", () => {
+  const context = gateContext(status({ status: "SETUP_NEEDED", next: "calendars", question: "Which of your calendars should count as busy?", draft: { ownerName: "Ana" }, mac: LATCH }))!;
+  assert.match(context, /Plow Latch/);
+  assert.match(context, /https:\/\/plow\.co\/download\/latch/);
+  assert.match(context, /https:\/\/plow\.co\/latch/);
+  assert.match(context, /iMessages and Google Calendar/);
+  assert.doesNotMatch(context, /and end the turn: Which of your calendars/);
+});
+
+test("with no Mac at the time zone question the gate still asks it, and adds the Latch link", () => {
+  const context = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: { ownerName: "Ana" }, mac: LATCH }))!;
+  assert.match(context, /and end the turn: What time zone are you in\?/);
+  assert.match(context, /https:\/\/plow\.co\/download\/latch/);
+  const connected = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: {}, mac: { connected: true } }))!;
+  assert.doesNotMatch(connected, /plow\.co/);
+});

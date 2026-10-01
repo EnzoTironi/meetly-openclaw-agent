@@ -46,7 +46,9 @@ channel `plow`, accountId `chat`, target the printed `chatUid`.
 3. Run `plow-messages search --after-rowid <rowid> --order asc --limit 50`.
    - On failure, or a `blocked` result: run `cursor.ts fail`. If `warn` is
      true, send the owner one DM saying Meetly can't read their messages;
-     if the Mac gave an `owner_action`, include it word for word. End.
+     if the Mac gave an `owner_action`, include it word for word. If the Mac
+     is not connected at all, say Meetly needs Plow Latch on their Mac and
+     give https://plow.co/download/latch. End.
    - Empty: run `cursor.ts ok` and go to step 6.
 4. Keep inbound rows (`is_from_me` false) from direct chats only. Group them by
    `sender`, in rowid order. For each sender:

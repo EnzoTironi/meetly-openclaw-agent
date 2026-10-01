@@ -48,6 +48,16 @@ name, from their Plow profile, and their time zone, from their Mac
 setup simply moves on. When `next` is still `ownerName` or `timezone`, that
 source had no answer (no name on Plow, the Mac not connected): ask the owner.
 
+## When the Mac is not connected
+
+Meetly reads the owner's iMessages and Google Calendar on their Mac through
+Plow Latch. At the time zone and calendars questions, `setup-status.ts` also
+returns `mac`. When `mac.connected` is false, tell the owner that in one or
+two lines and give them `mac.download` (where to get Plow Latch) and
+`mac.about`. Still ask the time zone; do not ask the calendars question until
+the Mac is connected, since it is answered from the Mac. Never ask the owner
+to install anything else.
+
 ## After setup
 
 - Change a setting ("change my window to 10-17", "call me Jean") →
