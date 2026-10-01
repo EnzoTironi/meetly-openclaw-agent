@@ -4,6 +4,10 @@
 // bridge, the Mac is not connected, or the command is refused or fails.
 export const BRIDGE_URL = "http://127.0.0.1:18790/mcp";
 
+// Where the owner gets Plow Latch, the app that connects their Mac.
+export const LATCH_DOWNLOAD_URL = "https://plow.co/download/latch";
+export const LATCH_ABOUT_URL = "https://plow.co/latch";
+
 export type BridgeOptions = { fetch?: typeof fetch; url?: string; token?: string };
 export type MacCommand = { argv: string[]; readPaths: string[]; goal: string; timeoutMs?: number };
 
@@ -29,4 +33,13 @@ export async function runOnMac(command: MacCommand, opts: BridgeOptions = {}): P
   const out = JSON.parse(text) as { exit_code?: number; output?: string };
   if (out.exit_code !== 0 || typeof out.output !== "string") return undefined;
   return out.output;
+}
+
+// Whether the Mac answers at all: `/usr/bin/true` through the bridge.
+export async function macConnected(opts: BridgeOptions = {}): Promise<boolean> {
+  const output = await runOnMac({
+    argv: ["/usr/bin/true"], readPaths: [],
+    goal: "Meetly setup: check that your Mac is connected",
+  }, opts).catch(() => undefined);
+  return output !== undefined;
 }

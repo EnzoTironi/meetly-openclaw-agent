@@ -268,3 +268,42 @@ test("a Mac that cannot answer, or answers something that is not a zone, leaves 
   }
 });
 
+
+const noProbe = async (): Promise<boolean> => { throw new Error("the Mac is not probed here"); };
+
+async function withHomeAsync(fn: (home: string) => Promise<void>): Promise<void> {
+  const saved = process.env.MEETLY_HOME;
+  process.env.MEETLY_HOME = tmpHome();
+  try {
+    await fn(process.env.MEETLY_HOME);
+  } finally {
+    if (saved === undefined) delete process.env.MEETLY_HOME;
+    else process.env.MEETLY_HOME = saved;
+  }
+}
+
+test("at the calendars question a Mac that is not connected is reported with the Plow Latch links", async () => {
+  await withHomeAsync(async () => {
+    for (const [field, value] of ANSWERS.slice(0, 6)) record(field as never, value);
+    const s = await statusFilling({ mac: async () => false });
+    assert.equal(s.status === "SETUP_NEEDED" && s.next, "calendars");
+    assert.deepEqual(s.status === "SETUP_NEEDED" && s.mac,
+      { connected: false, download: "https://plow.co/download/latch", about: "https://plow.co/latch" });
+    const on = await statusFilling({ mac: async () => true });
+    assert.deepEqual(on.status === "SETUP_NEEDED" && on.mac, { connected: true });
+  });
+});
+
+test("a time zone left for the owner says whether the Mac is connected; other questions and READY never probe it", async () => {
+  await withHomeAsync(async () => {
+    const tz = await statusFilling({ ownerName: async () => "Ana", timezone: async () => undefined, mac: async () => false });
+    assert.equal(tz.status === "SETUP_NEEDED" && tz.next, "timezone");
+    assert.equal(tz.status === "SETUP_NEEDED" && tz.mac?.connected, false);
+    record("timezone", "America/Sao_Paulo");
+    const days = await statusFilling({ mac: noProbe });
+    assert.equal(days.status === "SETUP_NEEDED" && days.mac, undefined);
+    for (const [field, value] of ANSWERS.slice(2)) record(field as never, value);
+    finish(() => ({}));
+    assert.equal((await statusFilling({ mac: noProbe })).status, "READY");
+  });
+});

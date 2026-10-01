@@ -217,3 +217,11 @@ test("a Meetly group is trusted but scoped to its meeting, and a group that fail
   assert.ok(group.includes("never fall back to `plow_start_thread` and never edit a script"));
   assert.ok(group.includes("`plow_set_thread_trust`"));
 });
+
+test("when the Mac cannot be reached the owner gets the Plow Latch download link", () => {
+  assert.ok(flat(prompt).includes("https://plow.co/download/latch"));
+  const poll = flat(readFileSync(join(SKILLS, "meetly-poll", "SKILL.md"), "utf8"));
+  assert.ok(poll.includes("https://plow.co/download/latch"));
+  const setup = flat(readFileSync(join(SKILLS, "meetly-setup", "SKILL.md"), "utf8"));
+  assert.ok(setup.includes("`mac.connected` is false"));
+});

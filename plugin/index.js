@@ -34,6 +34,22 @@ export function gateContext(stdout) {
   }
   if (status?.status !== "SETUP_NEEDED") return undefined;
   const name = status.draft?.ownerName;
+  // No Mac: the calendars question cannot be answered, so the owner gets
+  // Plow Latch instead; a time zone the owner can still type in.
+  const noMac = status.mac?.connected === false;
+  const latch = noMac
+    ? [`- Their Mac is not connected. In one or two lines, say Meetly reads their iMessages and Google Calendar on their Mac through Plow Latch, that they can download it at ${status.mac.download} (more at ${status.mac.about}), and to tell you once it is installed and connected.`]
+    : [];
+  if (noMac && status.next === "calendars") {
+    return [
+      "Meetly setup check, already run for this turn (setup-status.ts): SETUP_NEEDED. Setup is not finished.",
+      "Do not run setup-status.ts again this turn, and ignore any earlier setup question in the chat: this is the current state.",
+      "Your reply, in the owner's language:",
+      ...latch,
+      "- Do not ask which calendars to use yet: that needs the Mac. End the turn.",
+      `setup-status.ts output: ${JSON.stringify(status)}`,
+    ].join("\n");
+  }
   return [
     "Meetly setup check, already run for this turn (setup-status.ts): SETUP_NEEDED. Setup is not finished.",
     "Do not run setup-status.ts again this turn, and ignore any earlier setup question in the chat: this is the current state.",
@@ -41,6 +57,7 @@ export function gateContext(stdout) {
     "- If you have not introduced yourself in this conversation yet, open with one line: you are Meetly, their AI scheduling assistant, and a few questions set you up.",
     ...(name ? [`- In that line, say you will refer to them as ${name} when you talk to other people, and that they can change it.`] : []),
     "- If the owner asked for something else, such as reaching someone, say you will do it once setup is done.",
+    ...latch,
     status.question
       ? `- Then ask this question, translated into the owner's language, and end the turn: ${status.question}`
       : "- Every answer is in: run record-setup.ts --done and confirm that Meetly is on, as meetly-setup says.",
