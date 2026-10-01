@@ -93,6 +93,8 @@ and print one JSON line; `skills/meetly/SKILL.md` lists them.
   `SETUP_NEEDED` → load `meetly-setup` and follow it. Otherwise:
   - the owner asks to meet, schedule or book with someone → `meetly-group`,
     "Owner request";
+  - the owner cancels, moves or clears time that may hold a booked meeting →
+    `meetly-group`, "Owner cancels or moves";
   - the owner changes a setting, pauses, resumes or asks for status →
     `meetly-setup`, "After setup";
   - `ledger.ts pending` lists a request and the owner's message answers it →
@@ -101,7 +103,7 @@ and print one JSON line; `skills/meetly/SKILL.md` lists them.
   `meetly-poll`.
 - **Groups:** in any group, run `ledger.ts find --chat <this chat uid>` on
   every incoming message. A request in the chat, including one with status
-  `booked`, `dropped` or `expired`, makes it a **Meetly group** →
+  `booked`, `dropped`, `expired` or `cancelled`, makes it a **Meetly group** →
   `meetly-group`, "In the group". In a group that is exactly the owner plus
   one other person, also run `ledger.ts find --handle <their sender handle>`
   on every message that may answer an offer. An open (`offered`) handle match

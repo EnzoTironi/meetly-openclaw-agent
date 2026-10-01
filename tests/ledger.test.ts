@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  addRequest, saveRequest, cleanupList, pendingOwnerList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest,
+  addRequest, saveRequest, cleanupList, pendingOwnerList, expiredRequests, findByChat, findByEvent, findOpenByHandle, normalizeHandle, sameHandle, updateRequest,
   type Ledger, type NewRequest,
 } from "../skills/meetly/scripts/ledger.ts";
 import { cli, tmpHome } from "./helpers.ts";
@@ -207,4 +207,28 @@ test("a corrupt ledger.json fails loudly", () => {
   const r = cli("ledger.ts", ["find", "--handle", "+15551234567"], { MEETLY_HOME: home });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /ledger\.json/);
+});
+
+test("an owner cancellation finds the booked request by its event id and closes it as cancelled", () => {
+  let l = addRequest(empty(), input({ chatUid: "c1" }), T0, "r_1");
+  l = updateRequest(l, "r_1", { status: "booked", eventId: "ev_1" }, T0);
+  assert.equal(findByEvent(l, "ev_1")?.id, "r_1");
+  assert.equal(findByEvent(l, "ev_other"), undefined);
+  l = updateRequest(l, "r_1", { status: "cancelled" }, T0 + HOUR);
+  assert.equal(l.requests[0]!.status, "cancelled");
+  // A cancelled meeting is closed: no reminder, no expiry, and it frees the person for a new offer.
+  assert.deepEqual(expiredRequests(l, 0, T0 + 100 * HOUR), []);
+  assert.equal(findOpenByHandle(l, "+15551234567"), undefined);
+  assert.equal(findByChat(l, "c1")?.status, "cancelled");
+});
+
+test("CLI find --event returns the request booked as that event", () => {
+  const env = { MEETLY_HOME: tmpHome() };
+  const id = cli("ledger.ts", ["add", "--json", JSON.stringify(input({ chatUid: "c1" }))], env).json.request.id;
+  cli("ledger.ts", ["update", "--id", id, "--json", '{"status":"booked","eventId":"ev_1"}'], env);
+  assert.equal(cli("ledger.ts", ["find", "--event", "ev_1"], env).json.request.id, id);
+  assert.deepEqual(cli("ledger.ts", ["find", "--event", "ev_2"], env).json, { request: null });
+  const cancelled = cli("ledger.ts", ["update", "--id", id, "--json", '{"status":"cancelled"}'], env);
+  assert.equal(cancelled.status, 0, cancelled.stderr);
+  assert.equal(cancelled.json.request.status, "cancelled");
 });

@@ -118,6 +118,41 @@ In the owner's DM:
 5. Follow "Offer times" with `origin: owner`.
 6. Reply to the owner in one line: group opened, times offered and held.
 
+## Owner cancels or moves
+
+In the owner's DM, when the owner cancels, moves or clears time ("cancel my
+lunch with Ana", "remove all my appointments today", "move the call to 3pm"):
+
+1. Read the affected events from the calendar. For each one, run `ledger.ts
+   find --event <event id>`. An event with no request (or one whose request
+   is not `booked`) is not a Meetly meeting: handle it as the owner asked and
+   tell no one.
+2. Act on the owner's words. Their own instruction that covers the meeting
+   ("all", "everything today", the person's name) is the approval: do not ask
+   again. Ask once only when the words truly leave it open which meetings
+   are meant. When the owner repeats the instruction instead of answering,
+   that is the yes.
+3. For each booked request, with `<account>` = `booked.account`, or
+   `config.defaultAccount` when it has none:
+   - **Cancel:** `plow-gog calendar delete primary <eventId> --send-updates
+     all --force --account <account>`. Then `ledger.ts update --id <id>
+     --json '{"status":"cancelled","pendingOwner":null}'`.
+   - **Move:** `plow-gog calendar update primary <eventId> --from <start>
+     --to <end> --send-updates all --account <account> --json`, then
+     record it as in "Book the event" steps 1 and 2.
+4. Then tell them in their group (the request's `chatUid`), in one line, in
+   their language and in the third person: the owner cancelled (or moved)
+   the meeting, its day and time, and for a move the new time. Give no
+   reason unless the owner gave one to pass on. A Google cancellation email
+   is not a message from Meetly: the group message is always sent. With no
+   `chatUid`, tell the owner that the person was only notified by the
+   calendar.
+5. Reply to the owner in one line: what was cancelled or moved, and who was
+   told where.
+
+Example (pt-BR): "Oi Ana, o Jean precisou cancelar o almoço de qui., 01/10,
+às 12:30."
+
 ## Meeting format
 
 `format` is how the meeting happens: `meet` (Meetly creates a Google Meet),
@@ -224,7 +259,7 @@ offer.
 - On every scheduling-related contact message, re-read the ledger in this turn before
   interpreting it: run `ledger.ts find --chat <this chat uid>` and
   `ledger.ts find --handle <sender handle>`. A previous turn's request object
-  or status is stale. A request with status `booked`, `dropped` or `expired`
+  or status is stale. A request with status `booked`, `dropped`, `expired` or `cancelled`
   linked to this chat still makes it a Meetly group. Prefer the open
   (`offered`) handle match as the current request, even when the chat lookup
   finds a closed request; if it has no `chatUid`, link it to this chat with
@@ -236,8 +271,8 @@ offer.
   request.
 - **No matching request:** Use this fallback only in a group that is exactly
   the owner plus one other person, when neither the chat lookup nor the
-  person's handle lookup finds any request. A closed (`dropped`, `expired` or
-  `booked`) request linked to this chat still makes it a Meetly group and is
+  person's handle lookup finds any request. A closed (`dropped`, `expired`,
+  `cancelled` or `booked`) request linked to this chat still makes it a Meetly group and is
   handled by its closed-request rule; it is not a no-match. In all
   other unmatched groups, do not take Meetly action. For this owner group, do
   not infer which meeting or time the message refers to, and do not ask a
@@ -295,7 +330,9 @@ offer.
   tell the owner. Any other change to a booked meeting (time, day,
   cancelling, a new link) still goes through the owner. For `dropped`, say the request was
   given up and the owner will follow up; then tell the owner. For `expired`,
-  say the offer expired and the owner will follow up; then tell the owner. Do
+  say the offer expired and the owner will follow up; then tell the owner. For
+  `cancelled`, say the owner cancelled that meeting and will follow up if
+  there is a new time; then tell the owner. Do
   not run the no-match fallback for a closed request.
 - **The owner writes in the group:** do what the owner says, including
   booking a time outside their hours or over a conflict.

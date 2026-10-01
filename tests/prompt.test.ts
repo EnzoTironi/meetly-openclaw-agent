@@ -106,7 +106,7 @@ test("group requests without a matching ledger entry get a safe owner escalation
   assert.ok(flat(prompt).includes("If neither lookup finds any request for the chat or sender, load `meetly-group`, \"In the group\""));
   assert.ok(flat(prompt).includes("For every other unmatched group, do not load Meetly or run the fallback."));
   assert.ok(group.includes("**No matching request:**"));
-  assert.ok(group.includes("A closed (`dropped`, `expired` or `booked`) request linked to this chat still makes it a Meetly group"));
+  assert.ok(group.includes("A closed (`dropped`, `expired`, `cancelled` or `booked`) request linked to this chat still makes it a Meetly group"));
   assert.ok(group.includes("do not infer which meeting or time"));
   assert.ok(group.includes("do not ask a generic confirmation question"));
   assert.ok(group.includes("tell the owner in their DM"));
@@ -127,7 +127,7 @@ test("a group pick re-reads the current request and never substitutes pending", 
 
 test("closed Meetly requests stay in group handling, and true lookup disagreements are specific", () => {
   const group = flat(readFileSync(join(ROOT, "skills/meetly-group/SKILL.md"), "utf8"));
-  assert.ok(flat(prompt).includes("A request in the chat, including one with status `booked`, `dropped` or `expired`, makes it a **Meetly group**"));
+  assert.ok(flat(prompt).includes("A request in the chat, including one with status `booked`, `dropped`, `expired` or `cancelled`, makes it a **Meetly group**"));
   assert.ok(group.includes("For `dropped`, say the request was given up"));
   assert.ok(flat(group).includes("For `booked`, say the meeting is already scheduled"));
   assert.ok(flat(group).includes("For `expired`, say the offer expired"));
@@ -224,4 +224,19 @@ test("when the Mac cannot be reached the owner gets the Plow Latch download link
   assert.ok(poll.includes("https://plow.co/download/latch"));
   const setup = flat(readFileSync(join(SKILLS, "meetly-setup", "SKILL.md"), "utf8"));
   assert.ok(setup.includes("`mac.connected` is false"));
+});
+
+test("an owner who cancels or moves a booked meeting has Meetly tell the other person in their group", () => {
+  const p = flat(prompt);
+  assert.ok(p.includes("the owner cancels, moves or clears time that may hold a booked meeting → `meetly-group`, \"Owner cancels or moves\""));
+  const group = flat(readFileSync(join(SKILLS, "meetly-group", "SKILL.md"), "utf8"));
+  assert.ok(group.includes("## Owner cancels or moves"));
+  assert.ok(group.includes("run `ledger.ts find --event <event id>`"));
+  assert.ok(group.includes("'{\"status\":\"cancelled\",\"pendingOwner\":null}'"));
+  assert.ok(group.includes("tell them in their group (the request's `chatUid`)"));
+  assert.ok(group.includes("A Google cancellation email is not a message from Meetly"));
+  assert.ok(group.includes("For `cancelled`, say the owner cancelled that meeting"));
+  // The owner's own instruction covering the meeting is the approval; ask at most once.
+  assert.ok(group.includes("\"all\", \"everything today\""));
+  assert.ok(group.includes("When the owner repeats the instruction instead of answering, that is the yes"));
 });
