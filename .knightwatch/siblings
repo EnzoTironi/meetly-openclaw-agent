@@ -1,0 +1,20 @@
+# Repos a reviewer of THIS repo may search and cite, materialized under
+# .siblings/<owner>/<repo>. Declared rather than left to the fallback so the
+# set is the one this repo actually depends on.
+#
+# One per line. The reviewer host must also carry a SOURCE_PATHS entry for
+# each, or the sibling reports as `missing` and is never searched.
+#
+# Each row is a real edge. `plow-openclaw-agent` is the base the Dockerfile
+# builds FROM by digest, and `boot/` mirrors its boot step for step. `latch`
+# owns the MCP tools and the gog grammar that every calendar, contact and
+# iMessage read and write goes through. `plow-agents` owns the install
+# contract the README follows.
+#
+# `agent-index-client` stays out: it reaches this repo only through the base.
+# `plow-pbc/plow` stays out although the scripts call its API: it is private
+# and this repo is public, so a citation into it would publish private paths.
+
+plow-pbc/plow-openclaw-agent
+plow-pbc/latch
+plow-pbc/plow-agents
