@@ -100,6 +100,11 @@ test("every Meetly group is opened with start-thread.ts, never the base's 10-sec
   assert.ok(group.includes("run `reachable-handle.ts --handle <each phone and email>` and use the `handle` it returns"));
   assert.ok(group.includes("Never the `plow_start_thread` tool"));
   assert.ok(flat(prompt).includes("Meetly opens its groups with `start-thread.ts`"));
+  // An unconfirmed group is explained plainly, never resent by itself, and retried only when the owner says it is not there.
+  assert.ok(group.includes("Plow did not confirm it"));
+  assert.ok(group.includes("the holds are kept and the request is saved"));
+  assert.ok(group.includes("never quote a status code or say you cannot confirm anything else"));
+  assert.ok(group.includes("Only if the owner says the group is not there, or asks you to try again, run the same `start-thread.ts` command again with the same `--key` and `--body`"));
 });
 
 test("group requests without a matching ledger entry get a safe owner escalation", () => {
