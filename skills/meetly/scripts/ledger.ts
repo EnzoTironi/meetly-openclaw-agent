@@ -11,8 +11,8 @@ import { file } from "./paths.ts";
 import { readJson, updateJson } from "./store.ts";
 
 export type Status = "offered" | "booked" | "dropped" | "expired";
-export type Offer = { start: string; end: string; holdId?: string; account: string };
 export type HoldRef = { holdId: string; account: string };
+export type Offer = { start: string; end: string; holdId?: string; account: string; travel?: HoldRef[] };
 // A time outside the owner's days or window that the other person asked for,
 // waiting for the owner's yes or no.
 export type PendingOwner = { start: string; end: string; askedAt: string };
@@ -66,7 +66,7 @@ const LOG_TEXT_MAX = 300;
 export type Ledger = { requests: Request[] };
 
 export type NewRequest = Omit<Request,
-  "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "booked" | "meetUrl" | "roomUrl" | "reminder" | "offeredAt" | "closedAt" | "nudgedAt" | "log" | "createdAt" | "updatedAt">;
+  "id" | "status" | "eventId" | "pendingOwner" | "booked" | "meetUrl" | "roomUrl" | "reminder" | "offeredAt" | "closedAt" | "nudgedAt" | "log" | "createdAt" | "updatedAt">;
 export type Patch = Partial<Pick<Request,
   "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic" | "format" | "locale">> & {
   pendingOwner?: PendingOwner | null;
@@ -109,6 +109,13 @@ function checkBooked(b: Booked): void {
 function checkReminder(r: Reminder): void {
   if (!r || !isDate(r.at) || !OUTCOMES.includes(r.outcome)) {
     throw new Error(`reminder needs a valid at and an outcome of ${OUTCOMES.join(", ")}: ${JSON.stringify(r)}`);
+  }
+}
+
+function checkHoldRefs(refs: unknown, field: string): asserts refs is HoldRef[] {
+  if (!Array.isArray(refs) || refs.some((h) =>
+    !h || typeof h.holdId !== "string" || !h.holdId.trim() || typeof h.account !== "string" || !h.account.trim())) {
+    throw new Error(`${field} must be a list of hold ids and accounts: ${JSON.stringify(refs)}`);
   }
 }
 
@@ -159,8 +166,16 @@ function checkOffers(offered: unknown): Offer[] {
       throw new Error(`each offer needs a valid start and end: ${JSON.stringify(o)}`);
     }
     if (typeof o.account !== "string" || !o.account) throw new Error(`each offer needs an account: ${JSON.stringify(o)}`);
+    if (o.travel !== undefined) checkHoldRefs(o.travel, "each offer travel");
   }
   return offered as Offer[];
+}
+
+function offerHolds(offered: Offer[]): HoldRef[] {
+  return offered.flatMap((offer) => [
+    ...(offer.holdId ? [{ holdId: offer.holdId, account: offer.account }] : []),
+    ...(offer.travel ?? []),
+  ]);
 }
 
 export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: string): Ledger {
@@ -169,6 +184,7 @@ export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: s
   if (typeof input.topic !== "string" || !input.topic.trim()) throw new Error("topic is required");
   if (!Number.isInteger(input.durationMin) || input.durationMin <= 0) throw new Error("durationMin must be a positive whole number");
   checkOffers(input.offered);
+  if (input.holdCleanup !== undefined) checkHoldRefs(input.holdCleanup, "holdCleanup");
   const format = input.format === undefined ? "unknown" : input.format;
   checkFormat(format);
   if (input.locale !== undefined) checkLocale(input.locale);
@@ -192,11 +208,9 @@ export function saveRequest(ledger: Ledger, input: NewRequest, now: number, id: 
   // Reuse addRequest's validation and timestamp behavior, then apply its new
   // offer to the existing record. An absent chatUid must not erase the link.
   const validated = addRequest(EMPTY, input, now, id).requests[0]!;
-  const newHolds = new Set(validated.offered.flatMap((offer) => offer.holdId ? [`${offer.account}\0${offer.holdId}`] : []));
-  const replacedHolds = existing.offered.flatMap((offer) => offer.holdId && !newHolds.has(`${offer.account}\0${offer.holdId}`)
-    ? [{ holdId: offer.holdId, account: offer.account }]
-    : []);
-  const holdCleanup = [...(existing.holdCleanup ?? []), ...replacedHolds]
+  const newHolds = new Set(offerHolds(validated.offered).map((hold) => `${hold.account}\0${hold.holdId}`));
+  const replacedHolds = offerHolds(existing.offered).filter((hold) => !newHolds.has(`${hold.account}\0${hold.holdId}`));
+  const holdCleanup = [...(existing.holdCleanup ?? []), ...(validated.holdCleanup ?? []), ...replacedHolds]
     .filter((hold, index, holds) => holds.findIndex((item) => item.holdId === hold.holdId && item.account === hold.account) === index);
   const replacement: Request = {
     ...existing,
@@ -219,6 +233,7 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
   }
   if (patch.status !== undefined && !STATUSES.includes(patch.status)) throw new Error(`bad status: ${patch.status}`);
   if (patch.offered !== undefined) checkOffers(patch.offered);
+  if (patch.holdCleanup !== undefined) checkHoldRefs(patch.holdCleanup, "holdCleanup");
   const pending = patch.pendingOwner;
   if (pending) {
     if ([pending.start, pending.end, pending.askedAt].some((t) => typeof t !== "string" || Number.isNaN(Date.parse(t)))) {

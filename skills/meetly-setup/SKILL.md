@@ -81,7 +81,11 @@ to install anything else.
 - "My prayer time and gym can move" → `record-setup.ts --field movable --value <words from the titles>`
   (for example `prayer, gym`); "nothing can move" → `none`. Meetly then offers
   times over those blocks, and never repeats their titles to anyone.
+- "Leave an hour for travel around in-person meetings" →
+  `record-setup.ts --field travel --value <minutes>`; accept minutes or hours
+  from 1 minute to 3 hours. `none` clears the buffer. The default is no buffer.
 - "Pause Meetly" → `register-crons.ts --pause`. "Resume" → `register-crons.ts --resume`.
 - "Status" → summarize `setup-status.ts`: days, window, duration, horizon,
-  the video provider (Google Meet, or Zoom when `config.zoomRoomUrl` is set),
+  travel buffer when set, video provider (Google Meet, or Zoom when
+  `config.zoomRoomUrl` is set),
   calendars, and whether it is paused.

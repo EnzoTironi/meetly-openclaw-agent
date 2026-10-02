@@ -22,12 +22,14 @@ export type Config = {
   zoomRoomUrl?: string;
   // Words in the title of a block the owner lets Meetly offer times over.
   movable?: string[];
+  // Minutes to leave free before and after an in-person meeting.
+  travelMin?: number;
   setupDoneAt?: string;
   paused?: boolean;
 };
 
 // Every setting the owner can change.
-export const FIELDS = ["ownerName", "timezone", "days", "window", "durationMin", "horizonDays", "calendars", "videoProvider", "movable"] as const;
+export const FIELDS = ["ownerName", "timezone", "days", "window", "durationMin", "horizonDays", "calendars", "videoProvider", "movable", "travel"] as const;
 export type Field = (typeof FIELDS)[number];
 
 // What setup cannot start without, in the order it asks: nobody but the owner,
@@ -166,6 +168,20 @@ export function parseField(field: string, value: string): Partial<Config> {
       }
       return { movable: words };
     }
+    case "travel": {
+      const raw = value.trim().toLowerCase();
+      if (raw === "none" || raw === "0") return { travelMin: undefined };
+      let minutes: number;
+      const hours = /^(\d+(?:\.\d+)?)\s*h$/.exec(raw);
+      const mins = /^(\d+)\s*(?:min(?:ute)?s?)?$/.exec(raw);
+      if (hours) minutes = Number(hours[1]) * 60;
+      else if (mins) minutes = Number(mins[1]);
+      else throw new Error(`travel must be 1 to 180 minutes (or hours), or none, got "${value}"`);
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 180) {
+        throw new Error(`travel must be 1 to 180 minutes, got "${value}"`);
+      }
+      return { travelMin: minutes };
+    }
     case "calendars": {
       let parsed: unknown;
       try {
@@ -218,6 +234,12 @@ export function validateConfig(partial: Partial<Config>): Config {
   };
   if (p.zoomRoomUrl !== undefined) config.zoomRoomUrl = p.zoomRoomUrl;
   if (p.movable !== undefined) config.movable = p.movable;
+  if (p.travelMin !== undefined) {
+    if (!Number.isInteger(p.travelMin) || p.travelMin < 1 || p.travelMin > 180) {
+      throw new Error(`travel must be 1 to 180 minutes, got ${JSON.stringify(p.travelMin)}`);
+    }
+    config.travelMin = p.travelMin;
+  }
   if (p.setupDoneAt !== undefined) config.setupDoneAt = p.setupDoneAt;
   if (p.paused !== undefined) config.paused = p.paused;
   return config;
