@@ -35,11 +35,22 @@ test("the pipeline says who is waiting on whom, how long, what is booked next an
   assert.deepEqual(p.waitingOnThem.map((i) => [i.id, i.hoursWaiting]), [["r_bia", 30]]);
   // Upcoming only, soonest first; a meeting that already happened is not pipeline.
   assert.deepEqual(p.booked.map((i) => i.id), ["r_caio"]);
-  assert.equal(p.booked[0]!.booked?.start, "2026-10-05T15:00:00Z");
-  // Closed within the last week, newest first.
-  assert.deepEqual(p.closed.map((i) => i.id), ["r_edu"]);
+  // Only the booking's start and end: no calendar account.
+  assert.deepEqual(p.booked[0]!.booked, { start: "2026-10-05T15:00:00Z", end: "2026-10-05T15:30:00Z" });
+  // Closed within the last week, newest first, with when it closed.
+  assert.deepEqual(p.closed.map((i) => [i.id, i.closedAt]), [["r_edu", new Date(T0 - 2 * HOUR).toISOString()]]);
   const ana = p.waitingOnOwner[0]!;
-  assert.deepEqual([ana.name, ana.topic, ana.chatUid, ana.status], ["Ana", "intro call", "c1", "offered"]);
+  assert.deepEqual([ana.name, ana.topic, ana.status], ["Ana", "intro call", "offered"]);
+  // No chat uid reaches the model.
+  assert.equal(JSON.stringify(p).includes("c1"), false);
+});
+
+test("an update after a request closed does not make it look newly closed, and reopening clears the close", () => {
+  const touched = updateRequest(sample(), "r_fabi", { holdCleanup: [{ holdId: "h1", account: "jean@example.com" }] }, T0);
+  assert.deepEqual(pipeline(touched, T0).closed.map((i) => i.id), ["r_edu"]);
+  const reopened = updateRequest(sample(), "r_edu", { status: "offered" }, T0);
+  assert.equal("closedAt" in reopened.requests.find((r) => r.id === "r_edu")!, false);
+  assert.deepEqual(pipeline(reopened, T0).closed, []);
 });
 
 test("a booking recorded before the booked time existed still shows, last", () => {
@@ -54,6 +65,7 @@ test("history lists everything with a person, newest first, so the goal and the 
   const h = historyFor(l, "+15550000002");
   assert.deepEqual(h.map((r) => r.id), ["r_bia2", "r_bia"]);
   assert.deepEqual([h[1]!.topic, h[1]!.format, h[1]!.location, h[1]!.durationMin], ["lunch", "in_person", "Paulista", 30]);
+  assert.equal("booked" in h[0]!, false);
   assert.deepEqual(historyFor(l, "+15559999999"), []);
 });
 
@@ -74,6 +86,7 @@ test("the owner can ask who they are waiting on, and Meetly looks before it asks
   assert.ok(group.includes("## Pipeline"));
   assert.ok(group.includes("run `ledger.ts pipeline`"));
   assert.ok(group.includes("next step is advice, never a claim about what happened"));
+  assert.ok(group.includes("a booking with no time recorded: say its time is unavailable"));
   assert.ok(group.includes("## Before you ask the other person"));
   assert.ok(group.includes("run `ledger.ts history --handle <their handle>`"));
   assert.ok(group.includes("Never ask the other person for something you can find"));

@@ -47,6 +47,8 @@ export type Request = {
   meetUrl?: string;
   reminder?: Reminder;
   offeredAt: string;
+  // When it stopped being open (dropped, expired, ...), so later bookkeeping does not move it.
+  closedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -54,7 +56,7 @@ export type Request = {
 export type Ledger = { requests: Request[] };
 
 export type NewRequest = Omit<Request,
-  "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "booked" | "meetUrl" | "reminder" | "offeredAt" | "createdAt" | "updatedAt">;
+  "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "booked" | "meetUrl" | "reminder" | "offeredAt" | "closedAt" | "createdAt" | "updatedAt">;
 export type Patch = Partial<Pick<Request,
   "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic" | "format" | "locale">> & {
   pendingOwner?: PendingOwner | null;
@@ -163,7 +165,7 @@ export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: s
   const at = new Date(now).toISOString();
   // A new offer is never booked: a booking, its link and its reminder are
   // only ever set through update, where they are validated.
-  const { booked: _b, meetUrl: _m, reminder: _r, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "reminder">>;
+  const { booked: _b, meetUrl: _m, reminder: _r, closedAt: _c, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "reminder" | "closedAt">>;
   const request: Request = { ...fields, format, id, status: "offered", offeredAt: at, createdAt: at, updatedAt: at };
   return { requests: [...ledger.requests, request] };
 }
@@ -232,6 +234,11 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
     if (patch.meetUrl) throw new Error(`meetUrl is only for a meeting with format meet (this one is ${updated.format ?? "unknown"})`);
     delete updated.meetUrl;
   }
+  // When it stops being open, remember when; reopening clears it.
+  if (patch.status !== undefined && patch.status !== ledger.requests[index]!.status) {
+    if (patch.status === "offered" || patch.status === "booked") delete updated.closedAt;
+    else updated.closedAt = at;
+  }
   if (patch.offered !== undefined) updated.offeredAt = at;
   const requests = [...ledger.requests];
   requests[index] = updated;
@@ -261,20 +268,21 @@ export function cleanupList(ledger: Ledger): Request[] {
   return ledger.requests.filter((r) => (r.holdCleanup?.length ?? 0) > 0);
 }
 
-// One request as the owner sees it in the pipeline.
+// One request as the owner sees it in the pipeline: no chat uid, and a booking
+// only by its start and end.
 export type PipelineItem = {
   id: string;
   name?: string;
   topic: string;
   status: Status;
-  chatUid?: string;
   hoursWaiting?: number;
-  booked?: Booked;
-  updatedAt: string;
+  booked?: { start: string; end: string };
+  closedAt?: string;
 };
 
 const WEEK = 7 * 24 * 3600_000;
 const hoursSince = (iso: string, now: number) => Math.max(0, Math.floor((now - Date.parse(iso)) / 3600_000));
+const closedWhen = (r: Request) => r.closedAt ?? r.updatedAt;
 
 // Who is waiting on whom: offers the owner has to approve, offers the other
 // person has to answer (oldest first), meetings still to come (soonest
@@ -283,9 +291,8 @@ export function pipeline(ledger: Ledger, now: number): {
   waitingOnOwner: PipelineItem[]; waitingOnThem: PipelineItem[]; booked: PipelineItem[]; closed: PipelineItem[];
 } {
   const item = (r: Request, extra: Partial<PipelineItem> = {}): PipelineItem => {
-    const out: PipelineItem = { id: r.id, topic: r.topic, status: r.status, updatedAt: r.updatedAt, ...extra };
+    const out: PipelineItem = { id: r.id, topic: r.topic, status: r.status, ...extra };
     if (r.name !== undefined) out.name = r.name;
-    if (r.chatUid !== undefined) out.chatUid = r.chatUid;
     return out;
   };
   const open = ledger.requests.filter((r) => r.status === "offered");
@@ -295,18 +302,18 @@ export function pipeline(ledger: Ledger, now: number): {
     waitingOnOwner: open.filter((r) => r.pendingOwner).map((r) => item(r, { hoursWaiting: hoursSince(r.pendingOwner!.askedAt, now) })),
     waitingOnThem: open.filter((r) => !r.pendingOwner).map((r) => item(r, { hoursWaiting: hoursSince(r.offeredAt, now) }))
       .sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
-    booked: upcoming.sort((a, b) => startOf(a) - startOf(b)).map((r) => item(r, r.booked ? { booked: r.booked } : {})),
-    closed: ledger.requests.filter((r) => r.status !== "offered" && r.status !== "booked" && now - Date.parse(r.updatedAt) <= WEEK)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 10).map((r) => item(r)),
+    booked: upcoming.sort((a, b) => startOf(a) - startOf(b)).map((r) => item(r, r.booked ? { booked: { start: r.booked.start, end: r.booked.end } } : {})),
+    closed: ledger.requests.filter((r) => r.status !== "offered" && r.status !== "booked" && now - Date.parse(closedWhen(r)) <= WEEK)
+      .sort((a, b) => closedWhen(b).localeCompare(closedWhen(a))).slice(0, 10).map((r) => item(r, { closedAt: closedWhen(r) })),
   };
 }
 
 // Everything the ledger holds for one person, newest first: what the meeting
 // was for, how it was to happen, where, for how long.
-export function historyFor(ledger: Ledger, handle: string): Pick<Request, "id" | "status" | "name" | "topic" | "format" | "location" | "durationMin" | "booked" | "createdAt">[] {
+export function historyFor(ledger: Ledger, handle: string): Pick<Request, "id" | "status" | "name" | "topic" | "format" | "location" | "durationMin" | "createdAt">[] {
   return ledger.requests.filter((r) => sameHandle(r.handle, handle))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .map(({ id, status, name, topic, format, location, durationMin, booked, createdAt }) => ({ id, status, name, topic, format, location, durationMin, booked, createdAt }));
+    .map(({ id, status, name, topic, format, location, durationMin, createdAt }) => ({ id, status, name, topic, format, location, durationMin, createdAt }));
 }
 
 const EMPTY: Ledger = { requests: [] };

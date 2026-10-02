@@ -127,7 +127,8 @@ When the owner asks who they are waiting on, or how their meetings stand,
 run `ledger.ts pipeline` and answer in their language, one short line per
 person: what the meeting is for, and which of these it is: waiting on the
 owner (an out-of-hours time to approve), waiting on the other person (say
-for how many hours), booked (day and time), or closed in the past week. For
+for how many hours), booked (day and time; for a booking with no time
+recorded: say its time is unavailable), or closed in the past week. For
 an offer that has waited a day or more, suggest a next step, such as new
 times; the next step is advice, never a claim about what happened. State only
 what the ledger says.
