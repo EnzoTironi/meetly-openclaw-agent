@@ -149,6 +149,13 @@ function checkOffers(offered: unknown): Offer[] {
   return offered as Offer[];
 }
 
+function checkHoldRefs(refs: unknown, field: string): asserts refs is HoldRef[] {
+  if (!Array.isArray(refs) || refs.some((h) =>
+    !h || typeof h.holdId !== "string" || !h.holdId.trim() || typeof h.account !== "string" || !h.account.trim())) {
+    throw new Error(`${field} must be a list of hold ids and accounts: ${JSON.stringify(refs)}`);
+  }
+}
+
 export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: string): Ledger {
   if (input.origin !== "inbound" && input.origin !== "owner") throw new Error(`origin must be inbound or owner, got ${input.origin}`);
   if (typeof input.handle !== "string" || !input.handle.trim()) throw new Error("handle is required");
@@ -197,6 +204,44 @@ export function saveRequest(ledger: Ledger, input: NewRequest, now: number, id: 
     updatedAt: new Date(now).toISOString(),
   };
   return { requests: ledger.requests.map((r) => r.id === existing.id ? replacement : r) };
+}
+
+// Restore the last sent offer after a failed message send. Newly created holds
+// enter the cleanup queue in the same atomic ledger write, before deletion.
+export function rollbackOffer(ledger: Ledger, id: string, snapshot: {
+  offered: Offer[]; offeredAt: string; holdCleanup: HoldRef[]; newHolds: HoldRef[];
+}, now: number): Ledger {
+  checkOffers(snapshot.offered);
+  if (!isDate(snapshot.offeredAt)) throw new Error("offeredAt must be a time");
+  checkHoldRefs(snapshot.holdCleanup, "holdCleanup");
+  checkHoldRefs(snapshot.newHolds, "newHolds");
+  const index = ledger.requests.findIndex((r) => r.id === id);
+  if (index < 0) throw new Error(`no request ${id}`);
+  const current = ledger.requests[index]!;
+  if (current.status !== "offered") throw new Error(`request ${id} is not open`);
+  const currentHolds = new Set(current.offered.flatMap((offer) => offer.holdId ? [`${offer.account}\0${offer.holdId}`] : []));
+  if (snapshot.newHolds.some((hold) => !currentHolds.has(`${hold.account}\0${hold.holdId}`))) {
+    throw new Error("newHolds must belong to the current offer");
+  }
+  const holdCleanup = [...snapshot.holdCleanup, ...snapshot.newHolds]
+    .filter((hold, i, all) => all.findIndex((item) => item.holdId === hold.holdId && item.account === hold.account) === i);
+  const requests = [...ledger.requests];
+  requests[index] = { ...current, offered: snapshot.offered, offeredAt: snapshot.offeredAt, holdCleanup, updatedAt: new Date(now).toISOString() };
+  return { requests };
+}
+
+export function removeCleanupRef(ledger: Ledger, id: string, ref: HoldRef, now: number): Ledger {
+  checkHoldRefs([ref], "hold");
+  const index = ledger.requests.findIndex((r) => r.id === id);
+  if (index < 0) throw new Error(`no request ${id}`);
+  const current = ledger.requests[index]!;
+  const requests = [...ledger.requests];
+  requests[index] = {
+    ...current,
+    holdCleanup: (current.holdCleanup ?? []).filter((h) => h.holdId !== ref.holdId || h.account !== ref.account),
+    updatedAt: new Date(now).toISOString(),
+  };
+  return { requests };
 }
 
 export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: number): Ledger {
@@ -313,6 +358,18 @@ if (isMain(import.meta.url)) {
         const ledger = updateJson<Ledger>(path, EMPTY, (l) => updateRequest(l, values.id!, patch, now));
         return { request: ledger.requests.find((r) => r.id === values.id) };
       }
+      case "rollback-offer": {
+        if (!values.id) throw new Error("usage: ledger.ts rollback-offer --id X --json-file F");
+        const snapshot = jsonArg(values) as Parameters<typeof rollbackOffer>[2];
+        const ledger = updateJson<Ledger>(path, EMPTY, (l) => rollbackOffer(l, values.id!, snapshot, now));
+        return { request: ledger.requests.find((r) => r.id === values.id) };
+      }
+      case "cleanup-remove": {
+        if (!values.id) throw new Error("usage: ledger.ts cleanup-remove --id X --json-file F");
+        const ref = jsonArg(values) as HoldRef;
+        const ledger = updateJson<Ledger>(path, EMPTY, (l) => removeCleanupRef(l, values.id!, ref, now));
+        return { request: ledger.requests.find((r) => r.id === values.id) };
+      }
       case "expired": {
         const hours = values.hours !== undefined ? Number(values.hours) : holdHours();
         if (!Number.isFinite(hours) || hours < 0) throw new Error(`--hours must be a number >= 0, got ${values.hours}`);
@@ -328,7 +385,7 @@ if (isMain(import.meta.url)) {
         return { requests: dueReminders(readJson<Ledger>(path, EMPTY), now, lead) };
       }
       default:
-        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | cleanup | reminders");
+        throw new Error("usage: ledger.ts find | add | save | update | rollback-offer | cleanup-remove | expired | pending | cleanup | reminders");
     }
   });
 }

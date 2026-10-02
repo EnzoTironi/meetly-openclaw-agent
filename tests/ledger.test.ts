@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  addRequest, saveRequest, cleanupList, pendingOwnerList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest,
+  addRequest, saveRequest, rollbackOffer, removeCleanupRef, cleanupList, pendingOwnerList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest,
   type Ledger, type NewRequest,
 } from "../skills/meetly/scripts/ledger.ts";
 import { cli, tmpHome } from "./helpers.ts";
@@ -69,6 +69,27 @@ test("save replaces a duplicate open offer by normalized handle and preserves it
   assert.deepEqual(saved.requests[0]!.holdCleanup, [{ holdId: "h1", account: offer.account }]);
   assert.equal(saved.requests[0]!.offeredAt, new Date(T0 + HOUR).toISOString());
   assert.equal(findOpenByHandle(saved, "+15551234567")!.id, "r_1");
+});
+
+test("failed re-offer rollback restores offer age and cleanup refs before deleting new holds", () => {
+  const original = addRequest(empty(), input({ chatUid: "chat_1" }), T0 - 10 * HOUR, "r_1");
+  const withPendingCleanup = updateRequest(original, "r_1", { holdCleanup: [{ holdId: "h_pending", account: "jean@example.com" }] }, T0 - 5 * HOUR);
+  const newOffer = { ...offer, start: "2026-09-30T12:00:00-03:00", holdId: "h_new" };
+  const saved = saveRequest(withPendingCleanup, input({ chatUid: "chat_1", offered: [newOffer] }), T0, "r_2");
+  const rolledBack = rollbackOffer(saved, "r_1", {
+    offered: withPendingCleanup.requests[0]!.offered,
+    offeredAt: withPendingCleanup.requests[0]!.offeredAt,
+    holdCleanup: withPendingCleanup.requests[0]!.holdCleanup!,
+    newHolds: [{ holdId: "h_new", account: "jean@example.com" }],
+  }, T0 + HOUR);
+  assert.deepEqual(rolledBack.requests[0]!.offered, withPendingCleanup.requests[0]!.offered);
+  assert.equal(rolledBack.requests[0]!.offeredAt, withPendingCleanup.requests[0]!.offeredAt);
+  assert.deepEqual(rolledBack.requests[0]!.holdCleanup, [
+    { holdId: "h_pending", account: "jean@example.com" },
+    { holdId: "h_new", account: "jean@example.com" },
+  ]);
+  assert.deepEqual(removeCleanupRef(rolledBack, "r_1", { holdId: "h_new", account: "jean@example.com" }, T0 + 2 * HOUR).requests[0]!.holdCleanup,
+    [{ holdId: "h_pending", account: "jean@example.com" }]);
 });
 
 test("find by chat and sender resolves a replacement offer without a chat link", () => {
@@ -199,6 +220,25 @@ test("CLI add, find, update, expired and cleanup round-trip", () => {
     { holdId: "h1", account: "a" },
     { holdId: "h1", account: offer.account },
   ]);
+  const rollback = join(home, "rollback.json");
+  writeFileSync(rollback, JSON.stringify({
+    offered: [offer], offeredAt: "2026-09-28T12:00:00.000Z",
+    holdCleanup: [{ holdId: "h1", account: "a" }],
+    newHolds: [{ holdId: "h2", account: offer.account }],
+  }));
+  const rolledBack = cli("ledger.ts", ["rollback-offer", "--id", id, "--json-file", rollback], env);
+  assert.equal(rolledBack.status, 0, rolledBack.stderr);
+  assert.deepEqual(rolledBack.json.request.offered, [offer]);
+  assert.equal(rolledBack.json.request.offeredAt, "2026-09-28T12:00:00.000Z");
+  assert.deepEqual(rolledBack.json.request.holdCleanup, [
+    { holdId: "h1", account: "a" },
+    { holdId: "h2", account: offer.account },
+  ]);
+  const deleted = join(home, "deleted.json");
+  writeFileSync(deleted, JSON.stringify({ holdId: "h2", account: offer.account }));
+  const cleanup = cli("ledger.ts", ["cleanup-remove", "--id", id, "--json-file", deleted], env);
+  assert.equal(cleanup.status, 0, cleanup.stderr);
+  assert.deepEqual(cleanup.json.request.holdCleanup, [{ holdId: "h1", account: "a" }]);
 });
 
 test("a corrupt ledger.json fails loudly", () => {

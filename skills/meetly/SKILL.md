@@ -20,6 +20,8 @@ exits non-zero: report that line; never guess a result. State lives in
 | | `save --json '<obj>'` \| `--json-file F` | `{request}` (creates, or replaces the current open offer for that handle while preserving its id and chat link) |
 | | `update --id X --json '<patch>'` | `{request}`; patch keys: `status, chatUid, eventId, offered, holdCleanup, name, location, allowOverlap, constraints, topic, pendingOwner, format, locale, booked, meetUrl, reminder` (`null` clears `pendingOwner`, `booked`, `meetUrl`, `reminder`) |
 | | `expired [--hours N]` \| `pending` \| `cleanup` | `{requests}` |
+| | `rollback-offer --id X --json-file F` | atomically restores `offered`, `offeredAt` and the prior cleanup queue while queuing new holds for deletion |
+| | `cleanup-remove --id X --json-file F` | removes one hold ref after its deletion succeeded |
 | | `reminders [--lead-min N]` | `{requests}`: booked Meets whose link is due (default 10 min before, until 5 min after the start) |
 | `event.ts` | `--in F` | `{id, status, start, end, meetUrl}` from a saved `plow-gog calendar create/update/event --json` output |
 | `record-booking.ts` | `--id X --event-file F --account A` | `{request, meetUrl, warning?:"no-meet-link"}`: marks the request booked from the event |

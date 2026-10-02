@@ -59,7 +59,8 @@ free there.
    conflict. If none are left, tell the owner and stop.
 5. Persist the offer immediately after the holds exist, before sending or
    opening a group. When the request already has a `chatUid`, first keep its
-   current `offered[]`: it is what the person last saw. Run `ledger.ts save --json '<request>'` with every field:
+   current `offered[]`, `offeredAt` and `holdCleanup`: they describe what the
+   person last saw and any cleanup already pending. Run `ledger.ts save --json '<request>'` with every field:
    `origin`, `handle` (the intended contact handle), `name`, `sourceRowid`,
    `chatUid` if already known, `topic`, `location`, `durationMin`,
    `constraints`, `allowOverlap`, `format` and `locale` (see "Meeting
@@ -75,12 +76,18 @@ free there.
      From the owner's main DM use `plow_reply_to` with that `chatUid` and the
      new times; in the poll use `message` with that chat uid as its target;
      in the group itself reply normally. Say the new times were sent only
-     after that send succeeded. If it fails, the person still has the old
-     times: make them current again with `ledger.ts update --id <id> --json
-     '{"offered":<the offered[] you kept>,"holdCleanup":[]}'`, then delete
-     the new holds ("Holds"; a delete that fails goes in `holdCleanup`). Tell
-     the owner the specific error in one line and that the old times stand;
-     never say the request was updated or sent.
+     after that send succeeded. If it fails, write a JSON file containing the
+     saved `offered[]`, `offeredAt`, `holdCleanup` from before the save and
+     every new meeting hold ref, then run `ledger.ts rollback-offer --id <id>
+     --json-file <file>`. This atomically restores the old offer and timestamp,
+     preserves the existing cleanup queue, and queues every new hold before
+     any deletion. Delete the new holds ("Holds"); after each successful
+     delete, write `{ "holdId": "...", "account": "..." }` to a JSON file
+     and run `ledger.ts cleanup-remove --id <id> --json-file <file>`. A failed
+     delete stays queued for the poll. If rollback fails, stop and tell the
+     owner; do not delete unqueued holds or claim the old times stand. After a
+     successful rollback, tell the owner the specific send error and that the
+     old times stand; never say the new request was sent.
    - Otherwise open a group with the person's handle and the opener: run
      `start-thread.ts --member <handle> --body <opener> --key <key>`, with key
      `rowid:<sourceRowid>` in the poll and `owner:<handle>:<first offered
