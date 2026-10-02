@@ -10,7 +10,7 @@ import { isMeetUrl, isZoomRoomUrl } from "./event.ts";
 import { file } from "./paths.ts";
 import { readJson, updateJson } from "./store.ts";
 
-export type Status = "offered" | "booked" | "dropped" | "expired";
+export type Status = "offered" | "booked" | "dropped" | "expired" | "cancelled";
 export type HoldRef = { holdId: string; account: string };
 export type Offer = { start: string; end: string; holdId?: string; account: string; travel?: HoldRef[] };
 // A time outside the owner's days or window that the other person asked for,
@@ -83,7 +83,7 @@ export type Patch = Partial<Pick<Request,
   personNudgedAt?: string | null;
 };
 
-const STATUSES: readonly Status[] = ["offered", "booked", "dropped", "expired"];
+const STATUSES: readonly Status[] = ["offered", "booked", "dropped", "expired", "cancelled"];
 const FORMATS: readonly Format[] = ["meet", "in_person", "phone", "unknown"];
 const OUTCOMES: readonly Reminder["outcome"][] = ["sent", "cancelled", "no-link"];
 const PATCH_KEYS = [
@@ -276,6 +276,9 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
   }
   const at = new Date(now).toISOString();
   const updated: Request = { ...ledger.requests[index]!, updatedAt: at };
+  if (currentRequest.status !== "offered" && currentRequest.status !== "booked" && !currentRequest.closedAt) {
+    updated.closedAt = currentRequest.log?.at(-1)?.at ?? currentRequest.createdAt;
+  }
   for (const [key, value] of Object.entries(patch)) {
     if (value === null && (NULLABLE as readonly string[]).includes(key)) delete updated[key as (typeof NULLABLE)[number]];
     else if (value !== undefined) (updated as Record<string, unknown>)[key] = value;
@@ -311,7 +314,8 @@ export function appendLog(ledger: Ledger, id: string, text: string, now: number)
   const at = new Date(now).toISOString();
   const requests = [...ledger.requests];
   const r = requests[index]!;
-  requests[index] = { ...r, log: [...(r.log ?? []), { at, text: line }].slice(-LOG_MAX), updatedAt: at };
+  const closedAt = r.status !== "offered" && r.status !== "booked" ? r.closedAt ?? r.updatedAt : r.closedAt;
+  requests[index] = { ...r, ...(closedAt ? { closedAt } : {}), log: [...(r.log ?? []), { at, text: line }].slice(-LOG_MAX), updatedAt: at };
   return { requests };
 }
 
@@ -364,7 +368,7 @@ export type PipelineItem = {
 export const STALE_HOURS = 24;
 const WEEK = 7 * 24 * 3600_000;
 const hoursSince = (iso: string, now: number) => Math.max(0, Math.floor((now - Date.parse(iso)) / 3600_000));
-const closedWhen = (r: Request) => r.closedAt ?? r.updatedAt;
+const closedWhen = (r: Request) => r.closedAt ?? r.log?.at(-1)?.at ?? r.createdAt;
 
 const NEXT_STEP: Record<Stage, string> = {
   waiting_on_us: "owner decision needed",

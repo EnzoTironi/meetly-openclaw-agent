@@ -78,7 +78,7 @@ test("a deleted or cancelled event is recorded as cancelled and nothing is sent"
   const out = check(bookedMeet(), parseEvent(fixture("event-cancelled")), START - 5 * MIN);
   assert.equal(out.action, "cancelled");
   assert.equal(out.send, undefined);
-  assert.deepEqual(out.patch, { reminder: { at: new Date(START - 5 * MIN).toISOString(), outcome: "cancelled" } });
+  assert.deepEqual(out.patch, { status: "cancelled", reminder: { at: new Date(START - 5 * MIN).toISOString(), outcome: "cancelled" } });
 });
 
 test("a Meet removed from the event is recorded as no-link, for the owner to hear about", () => {
@@ -198,5 +198,8 @@ test("CLI: a cancelled event is written to the ledger so the next poll skips it"
   writeFileSync(eventFile, fixture("event-cancelled"));
   const out = cli("reminder-check.ts", ["--id", id, "--event-file", eventFile], env);
   assert.equal(out.json.action, "cancelled");
-  assert.equal(cli("ledger.ts", ["find", "--chat", "c1"], env).json.request.reminder.outcome, "cancelled");
+  const cancelled = cli("ledger.ts", ["find", "--chat", "c1"], env).json.request;
+  assert.equal(cancelled.reminder.outcome, "cancelled");
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.closedAt, cancelled.updatedAt);
 });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  addRequest, saveRequest, cleanupList, pendingOwnerList, ownerApprovalList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest, monitor, stageOf,
+  addRequest, saveRequest, appendLog, cleanupList, pendingOwnerList, ownerApprovalList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest, monitor, pipeline, stageOf,
   type Ledger, type NewRequest,
 } from "../skills/meetly/scripts/ledger.ts";
 import { cli, tmpHome } from "./helpers.ts";
@@ -177,6 +177,18 @@ test("cleanup lists only requests with pending hold deletes", () => {
   l = updateRequest(l, "r_2", { holdCleanup: [{ holdId: "h7", account: "jean@example.com" }], status: "expired" }, T0);
   l = updateRequest(l, "r_1", { holdCleanup: [] }, T0);
   assert.deepEqual(cleanupList(l).map((r) => r.id), ["r_2"]);
+});
+
+test("closure time stays fixed when a closed request gets another log entry", () => {
+  let l = addRequest(empty(), input(), T0, "r_1");
+  l = updateRequest(l, "r_1", { status: "cancelled" }, T0 + HOUR);
+  const closedAt = l.requests[0]!.closedAt;
+  assert.equal(closedAt, new Date(T0 + HOUR).toISOString());
+  l = appendLog(l, "r_1", "owner notified", T0 + 10 * HOUR);
+  assert.equal(l.requests[0]!.closedAt, closedAt);
+  assert.equal(pipeline(l, T0 + 11 * HOUR).closed[0]!.closedAt, closedAt);
+  const legacy = { requests: [{ ...l.requests[0]!, closedAt: undefined, log: undefined, updatedAt: new Date(T0 + 9 * 24 * HOUR).toISOString() }] };
+  assert.equal(pipeline(legacy, T0 + 2 * 24 * HOUR).closed[0]!.closedAt, new Date(T0).toISOString());
 });
 
 test("pendingOwner is set, listed and cleared", () => {
