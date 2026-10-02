@@ -20,12 +20,14 @@ export type Config = {
   defaultAccount: string;
   // The owner's personal Zoom room; unset means Google Meet.
   zoomRoomUrl?: string;
+  // Words in the title of a block the owner lets Meetly offer times over.
+  movable?: string[];
   setupDoneAt?: string;
   paused?: boolean;
 };
 
 // Every setting the owner can change.
-export const FIELDS = ["ownerName", "timezone", "days", "window", "durationMin", "horizonDays", "calendars", "videoProvider"] as const;
+export const FIELDS = ["ownerName", "timezone", "days", "window", "durationMin", "horizonDays", "calendars", "videoProvider", "movable"] as const;
 export type Field = (typeof FIELDS)[number];
 
 // What setup cannot start without, in the order it asks: nobody but the owner,
@@ -156,6 +158,14 @@ export function parseField(field: string, value: string): Partial<Config> {
       if (!isZoomRoomUrl(v)) throw new Error(`the video provider is meet, or your Zoom room link (https://zoom.us/j/... or /my/...), got "${value}"`);
       return { zoomRoomUrl: v };
     }
+    case "movable": {
+      if (value.trim().toLowerCase() === "none") return { movable: undefined };
+      const words = [...new Set(value.split(",").map((w) => w.trim().toLowerCase()).filter(Boolean))];
+      if (words.length === 0 || words.length > 20 || words.some((w) => w.length < 2 || w.length > 40)) {
+        throw new Error(`movable is 1 to 20 words of 2 to 40 characters from the titles of blocks that may move, separated by commas (or none), got "${value}"`);
+      }
+      return { movable: words };
+    }
     case "calendars": {
       let parsed: unknown;
       try {
@@ -207,6 +217,7 @@ export function validateConfig(partial: Partial<Config>): Config {
     defaultAccount: p.defaultAccount,
   };
   if (p.zoomRoomUrl !== undefined) config.zoomRoomUrl = p.zoomRoomUrl;
+  if (p.movable !== undefined) config.movable = p.movable;
   if (p.setupDoneAt !== undefined) config.setupDoneAt = p.setupDoneAt;
   if (p.paused !== undefined) config.paused = p.paused;
   return config;
