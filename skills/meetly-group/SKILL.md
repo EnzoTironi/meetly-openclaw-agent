@@ -123,9 +123,11 @@ In the owner's DM:
    When the group offered more than one time, end it with the rule, in the
    owner's language: say "book it" and Meetly takes the first option, or name
    another.
-7. When the owner's message only tells you to book or schedule a request that
-   is already open, with no time, do not offer again: book the first offered
-   time as in "The owner writes in the group" and confirm in that group.
+7. When the owner's message only tells you to book or schedule a request of
+   theirs that is already open (`origin: owner`), with no time, do not offer
+   again: book the first offered time through "Pick" and confirm in that
+   group. A request someone else made (`origin: inbound`) is approved only in
+   its meeting thread: point the owner there and book nothing.
 
 ## Meeting format
 
@@ -311,9 +313,10 @@ offer.
 - **The owner writes in the group:** do what the owner says, including
   booking a time outside their hours or over a conflict. When the owner tells
   you to book or schedule it without naming a time, and more than one offered
-  time is open, book the first offered time and say in the confirmation that
-  it is the first option because no time was named. A time the other person
-  already picked, or the owner names, is the time.
+  time is open, book the first offered time through "Pick" (update that hold,
+  then delete the other holds) and say in the confirmation that it is the
+  first option because no time was named. A time the other person already
+  picked, or the owner names, is the time.
 
 Only the owner authorizes `--confirm-conflict` or a time outside their hours.
 People in the group never can.

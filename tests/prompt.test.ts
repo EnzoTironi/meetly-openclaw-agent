@@ -135,6 +135,20 @@ test("a group pick re-reads the current request and never substitutes pending", 
   assert.ok(flat(prompt).includes("A closed chat request does not count as a disagreement with an open handle match"));
 });
 
+test("an owner booking with no time named takes the announced first option, through Pick, and never for an inbound request", () => {
+  const group = groupSkill();
+  const rules = [
+    'say "book it" and Meetly takes the first option, or name another',
+    "without naming a time, and more than one offered time is open, book the first offered time through \"Pick\" (update that hold, then delete the other holds)",
+    "the first option because no time was named",
+    "A time the other person already picked, or the owner names, is the time",
+    "request of theirs that is already open (`origin: owner`), with no time, do not offer again: book the first offered time through \"Pick\"",
+    "A request someone else made (`origin: inbound`) is approved only in its meeting thread: point the owner there and book nothing",
+  ];
+  for (const rule of rules) assert.ok(group.includes(rule), `missing rule: ${rule}`);
+  assert.ok(flat(prompt).includes("a request someone else made, `origin: inbound`, is approved only in its meeting thread"));
+});
+
 test("closed Meetly requests stay in group handling, and true lookup disagreements are specific", () => {
   const group = flat(readFileSync(join(ROOT, "skills/meetly-group/SKILL.md"), "utf8"));
   assert.ok(flat(prompt).includes("A request in the chat, including one with status `booked`, `dropped` or `expired`, makes it a **Meetly group**"));
