@@ -137,7 +137,10 @@ export async function listEvents(
     }, opts).catch(() => undefined);
     try {
       if (output === undefined) throw new Error("unreadable");
-      events.push(...eventsOf(listingOf(output)).events.map((e) => ({ ...e, account })));
+      const listing = eventsOf(listingOf(output));
+      events.push(...listing.events.map((e) => ({ ...e, account })));
+      // Part of the listing could not be read: the account is not fully searched.
+      if (listing.degraded.length > 0) degraded.push(account);
     } catch {
       degraded.push(account);
     }

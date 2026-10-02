@@ -47,6 +47,13 @@ test("an account the Mac could not read is degraded, never reported as empty", a
   assert.deepEqual(r, { events: [], degraded: ["owner@example.com"] });
 });
 
+test("a listing that says part of it could not be read is degraded, even though the call succeeded", async () => {
+  const listing = JSON.stringify({ items: [gog("e1", "Sync", "2026-10-01T10:00:00-03:00", "2026-10-01T10:30:00-03:00")], degraded: ["team@group.calendar.google.com"] });
+  const r = await listOwnerEvents({ calendars: [{ account: "owner@example.com", id: "owner@example.com" }] }, range, { token: "tok", fetch: macBridge(() => listing) });
+  assert.deepEqual(r.events.map((e) => e.id), ["e1"]);
+  assert.deepEqual(r.degraded, ["owner@example.com"]);
+});
+
 test("the CLI needs a range and a finished setup, and prints only the safe fields", () => {
   const home = tmpHome();
   writeJson(join(home, "config.json"), {
