@@ -369,6 +369,15 @@ offer.
 - **Another day or time:** delete the current meeting and travel holds. Run `slots.ts` narrowed
   to what they said (plus the owner's original constraints for
   `origin: owner`), hold again, offer again, and update `offered`.
+- **None of these times work:** treat this as a request for another offer, not
+  a decline. Use any availability or date range they gave to narrow the next
+  search; when they gave no new constraint, keep the request's original
+  constraints and search the remaining configured horizon. Re-read the
+  calendar, find and hold up to three fresh slots (including travel buffers),
+  save them through the normal "Offer times" flow, then send the new options
+  in this thread. The ledger replacement queues old holds for cleanup. If
+  there are no fresh slots, tell them and ask for a date range; never claim a
+  slot is free from an earlier calendar read.
 - **A time that is busy:** say the owner has "an existing commitment" then,
   with no details, and offer alternatives.
 - **Only a time outside the owner's hours:** follow "Outside the owner's

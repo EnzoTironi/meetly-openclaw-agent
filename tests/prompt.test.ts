@@ -261,3 +261,11 @@ test("Meetly researches the current thread, contact history and relevant message
   assert.ok(group.includes("search the owner's relevant email and Plow messages"));
   assert.ok(group.includes("ask the owner privately before contacting the other person"));
 });
+
+test("Meetly re-proposes fresh times when the other person says none of the options work", () => {
+  const group = flat(readFileSync(join(SKILLS, "meetly-group", "SKILL.md"), "utf8"));
+  assert.ok(group.includes("**None of these times work:** treat this as a request for another offer"));
+  assert.ok(group.includes("Re-read the calendar"));
+  assert.ok(group.includes("search the remaining configured horizon"));
+  assert.ok(group.includes("never claim a slot is free from an earlier calendar read"));
+});
