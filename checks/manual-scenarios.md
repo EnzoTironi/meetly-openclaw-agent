@@ -17,13 +17,13 @@ Shortcuts:
 
 ## 0. Image
 
-- [ ] **Base pulls.** `docker build --platform linux/amd64 -t meetly:dev .`
+- [ ] **Base pulls.** `docker build -t meetly:dev .`
   succeeds.
-- [ ] **Scripts run in the image.** `docker run --rm --platform linux/amd64 -e
+- [ ] **Scripts run in the image.** `docker run --rm -e
   MEETLY_HOME=/tmp/m --entrypoint node meetly:dev
   /opt/plow/skills/meetly/scripts/setup-status.ts` prints one `SETUP_NEEDED`
   JSON line.
-- [ ] **Skills and runtime.** `docker run --rm --platform linux/amd64
+- [ ] **Skills and runtime.** `docker run --rm
   --entrypoint sh meetly:dev -c 'ls /opt/plow/skills && test -f
   /app/openclaw.mjs && node --version'`.
   - Expect: `google-workspace`, `owners-mac`, `meetly`, `meetly-group`,
@@ -48,14 +48,14 @@ Shortcuts:
    - Expect: the opener is in the third person, in the sender's language, and
      lists 3 labels in the sender's locale format.
    - Expect: 3 `Hold: …` events on the owner's primary calendar.
-   - Expect: a one-line DM to the owner.
+   - Expect: the opener reaches the owner in the same group.
    - Check: `m/ledger.ts find --handle <phone>` shows the request with
      `chatUid` and three `holdId`s.
 4. [ ] **Pick a time.** In the group: "the second one".
    - Expect: that hold becomes the event (no "Hold:", the attendee invited if
      Contacts has an email).
    - Expect: the other two holds are gone.
-   - Expect: a confirmation in the group and a DM to the owner.
+   - Expect: one confirmation in the group for the owner and guest.
    - Check: the ledger status is `booked`, with `eventId`.
 5. [ ] **Different day.** Start a new request, then reply "can we do Thursday
    instead?".
@@ -70,10 +70,11 @@ Shortcuts:
    do Saturday 10:00 (outside the configured days).
    - Expect: Meetly tells them it will check with the owner, and holds and
      books nothing.
-   - Expect: the owner gets a one-line DM asking to confirm.
-   - Owner answers "yes": the event is booked, the holds are deleted, and
+   - Expect: the owner is asked to confirm in the same group.
+   - Owner answers "yes" in the group: the event is booked, the holds are deleted, and
      the group is confirmed.
-   - Repeat with "no": the group gets alternatives, and
+   - A "yes" in the owner's DM redirects them to approve in the group, with no calendar changes.
+   - Repeat with "no" in the group: the group gets alternatives, and
      `m/ledger.ts pending` is empty.
 8. [ ] **Email-only sender.** iMessage from an Apple ID with no phone in
    Contacts.
