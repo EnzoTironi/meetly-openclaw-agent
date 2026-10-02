@@ -81,4 +81,5 @@ to install anything else.
   times are offered whenever they clear that notice.
 - "Pause Meetly" → `register-crons.ts --pause`. "Resume" → `register-crons.ts --resume`.
 - "Status" → summarize `setup-status.ts`: days, window, duration, horizon,
-  calendars, and whether it is paused.
+  the minimum notice (2 hours when `config.minNoticeMin` is unset), calendars,
+  and whether it is paused.
