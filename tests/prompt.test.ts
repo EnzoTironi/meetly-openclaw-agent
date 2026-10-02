@@ -255,3 +255,10 @@ test("setup asks only what nobody can infer, and the rest starts at defaults", (
   assert.ok(readme.includes("starts at these defaults"));
   assert.ok(!readme.includes("asks that one thing"));
 });
+
+test("an out-of-hours time with insufficient notice is not described as a calendar conflict", () => {
+  const group = flat(readFileSync(join(SKILLS, "meetly-group", "SKILL.md"), "utf8"));
+  assert.ok(group.includes("`reason: \"too-soon\"`: say there is not enough notice"));
+  assert.ok(group.includes("do not call it a calendar conflict"));
+  assert.ok(group.includes("`reason: \"busy\"`: say the owner has an existing commitment"));
+});
