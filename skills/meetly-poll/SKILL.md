@@ -12,8 +12,10 @@ Mac's own `plow-messages`, `contacts` and `google-workspace` skills for their
 exact argument arrays, and always pass `read_paths: ["~/Library/Messages"]`
 to `plow-messages`.
 
-To message the owner: `owner-chat.ts`, then `message` with action `send`,
-channel `plow`, accountId `chat`, target the printed `chatUid`.
+This unattended turn has no current conversation. Send meeting notifications
+with `message` (action `send`, channel `plow`, accountId `chat`, target the
+meeting's `chatUid`); the owner is in that thread. For an operational warning
+with no meeting thread, use `owner-chat.ts` and target the printed `chatUid`.
 
 1. Run `setup-status.ts`. If it is not `READY`, or `config.paused` is true, end.
    (Pausing disables this job, so a paused Meetly sends no reminders either.)
@@ -37,8 +39,8 @@ channel `plow`, accountId `chat`, target the printed `chatUid`.
         mark it sent: never resend.
       - `wait`: the meeting moved; nothing now.
       - `cancelled`: the event was deleted; send nothing.
-      - `no-link`: the Meet was removed from the event. Tell the owner in
-        one line that no link went out for <name>'s meeting.
+      - `no-link`: the Meet was removed from the event. Tell the meeting
+        thread in one line that no link went out for <name>'s meeting.
       - `skip`: already handled.
 2. Run `cursor.ts get`. If `rowid` is `null`: run `plow-messages search
    --order desc --limit 1`, then `cursor.ts set <that rowid, or 0>`, and end.
@@ -78,7 +80,7 @@ channel `plow`, accountId `chat`, target the printed `chatUid`.
    - For each request from `ledger.ts expired`: delete its holds ("Holds" in
      `meetly-group`), then `ledger.ts update --id <id> --json
      '{"status":"expired","pendingOwner":null}'`. If it has a `chatUid`, tell
-     the group the held times were released. Tell the owner in one line.
+     the group the held times were released; this also notifies the owner.
    - For each request from `ledger.ts cleanup`: retry each delete, then
      update `holdCleanup` to what is still left (`[]` when none).
 7. If nothing happened, end silently.
