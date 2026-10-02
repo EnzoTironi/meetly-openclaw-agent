@@ -170,8 +170,11 @@ so the calendar invitation goes out with `--send-updates all`. It holds the
 address from contacts, or one the owner gave or approved. An address a guest
 gives is not added until the owner approves it in the meeting thread ("<name>
 gave <email>: send the calendar invitation there?"); on their yes, record it
-with `ledger.ts update --id <id> --json '{"attendeeEmail":"<email>"}'` and
-book from that field.
+by writing `{"attendeeEmail":"<email>"}` with the `write` tool to
+`/var/lib/plow/meetly/tmp/attendee-email.json`, then run
+`ledger.ts update --id <id> --json-file
+/var/lib/plow/meetly/tmp/attendee-email.json`; book from that field. Never
+interpolate an email address into shell source.
 
 Then:
 
@@ -192,9 +195,17 @@ Then:
    email; when there is none, ask for it once. An invitation that is pending
    is not an acceptance: never say the person accepted.
 5. When the person gives their email after the booking, and the owner has
-   approved it as above, add it as an attendee with `plow-gog calendar update primary <eventId> --account
-   <booked.account>` and `--send-updates all` (following the Mac's
-   `google-workspace` skill), then say the invitation was sent.
+   approved it as above, first add it as an attendee with `plow-gog calendar
+   update primary <eventId> --account <booked.account>` and `--send-updates
+   all` (following the Mac's `google-workspace` skill). Only after that
+   calendar update succeeds, write `{"attendeeEmail":"<email>"}` with the
+   `write` tool to `/var/lib/plow/meetly/tmp/attendee-email.json` and persist
+   it with `ledger.ts update --id <id> --json-file
+   /var/lib/plow/meetly/tmp/attendee-email.json`. If the calendar update
+   fails, do not persist the email; report the failure to the owner so the
+   contact can retry. If persistence fails after the calendar update, report
+   that the invitation update succeeded but ledger persistence failed. Say
+   the invitation was sent only when the calendar update succeeds.
 
 ## Outside the owner's hours
 

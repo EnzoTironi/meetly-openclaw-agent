@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { isMain, run } from "./cli.ts";
+import { isEmailAddress } from "./reachable-handle.ts";
 import { holdHours, reminderLeadMin } from "./config.ts";
 import { isMeetUrl } from "./event.ts";
 import { file } from "./paths.ts";
@@ -59,7 +60,7 @@ export type NewRequest = Omit<Request,
   "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "booked" | "meetUrl" | "reminder" | "offeredAt" | "createdAt" | "updatedAt">;
 export type Patch = Partial<Pick<Request,
   "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic" | "format" | "locale">> & {
-  attendeeEmail?: string | null;
+  attendeeEmail?: string;
   pendingOwner?: PendingOwner | null;
   booked?: Booked | null;
   meetUrl?: string | null;
@@ -74,7 +75,7 @@ const PATCH_KEYS = [
   "format", "locale", "booked", "meetUrl", "reminder", "attendeeEmail",
 ];
 // Keys a patch can clear with null.
-const NULLABLE = ["pendingOwner", "booked", "meetUrl", "reminder", "attendeeEmail"] as const;
+const NULLABLE = ["pendingOwner", "booked", "meetUrl", "reminder"] as const;
 
 const isDate = (t: unknown) => typeof t === "string" && !Number.isNaN(Date.parse(t));
 
@@ -95,10 +96,9 @@ function checkBooked(b: Booked): void {
   }
 }
 
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 function checkEmail(email: unknown): string {
   const e = typeof email === "string" ? email.trim().toLowerCase() : "";
-  if (!EMAIL.test(e)) throw new Error(`attendeeEmail must be an email address, got ${JSON.stringify(email)}`);
+  if (!isEmailAddress(e)) throw new Error(`attendeeEmail must be an email address, got ${JSON.stringify(email)}`);
   return e;
 }
 
@@ -224,7 +224,7 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
   }
   if (patch.format !== undefined) checkFormat(patch.format);
   if (patch.locale !== undefined) checkLocale(patch.locale);
-  const patched = patch.attendeeEmail ? { ...patch, attendeeEmail: checkEmail(patch.attendeeEmail) } : patch;
+  const patched = patch.attendeeEmail !== undefined ? { ...patch, attendeeEmail: checkEmail(patch.attendeeEmail) } : patch;
   if (patch.booked) checkBooked(patch.booked);
   if (patch.reminder) checkReminder(patch.reminder);
   if (patch.meetUrl !== undefined && patch.meetUrl !== null && !isMeetUrl(patch.meetUrl)) {
