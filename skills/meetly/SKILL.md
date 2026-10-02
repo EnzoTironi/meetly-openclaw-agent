@@ -24,7 +24,7 @@ exits non-zero: report that line; never guess a result. State lives in
 | `blocklist.ts` | `block --handle H [--name N]` \| `unblock --handle H` \| `check --handle H` \| `list` | `{blocked}`: the list, or for `check` true or false. `start-thread.ts` refuses anyone on it |
 | | `reminders [--lead-min N]` | `{requests}`: booked Meets whose link is due (default 10 min before, until 5 min after the start) |
 | `event.ts` | `--in F` | `{id, status, start, end, meetUrl}` from a saved `plow-gog calendar create/update/event --json` output |
-| `record-booking.ts` | `--id X --event-file F --account A` | `{request, meetUrl, warning?:"no-meet-link"}`: marks the request booked from the event |
+| `record-booking.ts` | `--id X --event-file F --account A` | `{request, meetUrl, warning?:"no-meet-link"}`: marks the request booked from the event; with `config.zoomRoomUrl` set, a video meeting keeps that room as `roomUrl` and has no missing-link warning |
 | `reminder-check.ts` | `--id X --event-file F [--lead-min N]` | `{action:"send"\|"wait"\|"cancelled"\|"no-link"\|"skip", send?:{chatUid, meetUrl, name, locale, time, minutesToStart}}` |
 | | `--id X --sent` | `{request}`: the reminder went out; refused if already handled |
 | `busy.ts` | `--fetch` (reads the Mac, writes `tmp/busy.json`) | `{file, busy:<count>, degraded, unknownAfter?}` |
@@ -39,7 +39,8 @@ exits non-zero: report that line; never guess a result. State lives in
 Notes:
 - A request's `format` is `meet`, `in_person`, `phone` or `unknown`.
   `meetUrl` only ever holds `https://meet.google.com/xxx-xxxx-xxx`, only on
-  a `meet`; the ledger refuses anything else.
+  a `meet`; the ledger refuses anything else. `roomUrl` only ever holds the
+  owner's configured Zoom room (`https://zoom.us/j/...`), also only on a `meet`.
 - Booking and reminders read the event from a file of plow-gog's own
   output; never copy an event id, time or link by hand.
 - `slots.ts` only offers times inside the owner's days and window. Requests

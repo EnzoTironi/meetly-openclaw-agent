@@ -76,6 +76,9 @@ to install anything else.
   `record-setup.ts --field <field> --value <v>`, with the same normalization,
   then confirm in one line. During setup the owner can change the name the
   same way before answering the current question.
+- "I use Zoom, here is my room: <link>" → `record-setup.ts --field videoProvider --value <their Zoom room link>`;
+  "use Google Meet" → `meet`. Meetly posts that room and cannot create new Zoom links.
 - "Pause Meetly" → `register-crons.ts --pause`. "Resume" → `register-crons.ts --resume`.
 - "Status" → summarize `setup-status.ts`: days, window, duration, horizon,
+  the video provider (Google Meet, or Zoom when `config.zoomRoomUrl` is set),
   calendars, and whether it is paused.

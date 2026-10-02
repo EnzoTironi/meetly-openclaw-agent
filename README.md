@@ -84,6 +84,9 @@ Everything else starts at these defaults:
 - meeting length: 30 minutes,
 - offers up to 14 days ahead.
 
+Video calls use Google Meet. If you use Zoom, give Meetly your personal room
+link and it uses that for every video meeting; it cannot create new Zoom links.
+
 Change any of it later in plain words ("make my window 10 to 17", "I don't
 take meetings on Fridays"), or say "pause Meetly" / "resume Meetly".
 

@@ -109,6 +109,13 @@ test("an unknown time zone fails through the CLI", () => {
 });
 
 test("durations and horizons are bounded integers", () => {
+  // The video provider is Meet, or the owner's personal Zoom room (a strict https zoom.us URL).
+  assert.deepEqual(parseField("videoProvider", "meet"), { zoomRoomUrl: undefined });
+  const room = "https://us02web.zoom.us/j/123456789?pwd=abc.DEF";
+  assert.deepEqual(parseField("videoProvider", ` ${room} `), { zoomRoomUrl: room });
+  for (const bad of ["zoom", "http://zoom.us/j/1", "https://zoom.us.evil.example/j/1", "https://zoom.us/j/1?x=1", "https://example.com/j/1"]) {
+    assert.throws(() => parseField("videoProvider", bad), /Zoom/, bad);
+  }
   assert.throws(() => parseField("durationMin", "5"));
   assert.throws(() => parseField("durationMin", "abc"));
   assert.throws(() => parseField("durationMin", "241"));
@@ -190,6 +197,10 @@ test("editing a field after setup updates config.json and keeps setupDoneAt", ()
     assert.equal(config.windowStart, "10:00");
     assert.equal(config.windowEnd, "17:00");
     assert.equal(config.setupDoneAt, "2026-09-26T12:00:00.000Z");
+    record("videoProvider", "https://zoom.us/j/123456789");
+    assert.equal(readJson<Config | null>(join(home, "config.json"), null)!.zoomRoomUrl, "https://zoom.us/j/123456789");
+    record("videoProvider", "meet");
+    assert.equal("zoomRoomUrl" in readJson<object>(join(home, "config.json"), {}), false);
     assert.throws(() => record("durationMin", "600"));
     assert.throws(() => record("color", "blue"), /unknown field/);
   });

@@ -99,6 +99,11 @@ test("the owner can ask who they are waiting on, and Meetly looks before it asks
   assert.ok(group.includes("The next step is advice computed from the stage, never a claim about what happened"));
   assert.ok(group.includes("Write only what the calendar or the chat confirmed, never a plan or a guess"));
   assert.ok(group.includes("`start-thread.ts` refuses to open a group with anyone on the list"));
+  assert.ok(group.includes("## Video provider"));
+  assert.ok(group.includes("`--location <config.zoomRoomUrl>` and no `--with-meet`"));
+  assert.ok(group.includes("Meetly cannot create a Zoom link and never takes one from a message"));
+  assert.ok(flat("skills/meetly-setup/SKILL.md").includes("`record-setup.ts --field videoProvider --value <their Zoom room link>`"));
+  assert.ok(flat("README.md").includes("give Meetly your personal room link"));
   assert.ok(flat("skills/meetly-poll/SKILL.md").includes("`blocklist.ts check --handle <sender>` says `blocked`, skip"));
   assert.ok(group.includes("## Before you ask the other person"));
   assert.ok(group.includes("run `ledger.ts history --handle <their handle>`"));
