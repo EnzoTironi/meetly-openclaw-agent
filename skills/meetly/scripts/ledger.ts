@@ -43,6 +43,9 @@ export type Request = {
   pendingOwner?: PendingOwner;
   // Inbound request is held for explicit owner approval before outreach.
   ownerApprovalAt?: string;
+  // Set only after the owner approves this exact offer, whether or not Plow
+  // returned a chat uid for the attempted delivery.
+  ownerApprovedAt?: string;
   format?: Format;
   locale?: string;
   booked?: Booked;
@@ -70,11 +73,12 @@ const LOG_TEXT_MAX = 300;
 export type Ledger = { requests: Request[] };
 
 export type NewRequest = Omit<Request,
-  "id" | "status" | "eventId" | "pendingOwner" | "ownerApprovalAt" | "booked" | "meetUrl" | "roomUrl" | "reminder" | "offeredAt" | "closedAt" | "nudgedAt" | "personNudgedAt" | "log" | "createdAt" | "updatedAt">;
+  "id" | "status" | "eventId" | "pendingOwner" | "ownerApprovalAt" | "ownerApprovedAt" | "booked" | "meetUrl" | "roomUrl" | "reminder" | "offeredAt" | "closedAt" | "nudgedAt" | "personNudgedAt" | "log" | "createdAt" | "updatedAt">;
 export type Patch = Partial<Pick<Request,
   "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic" | "format" | "locale">> & {
   pendingOwner?: PendingOwner | null;
   ownerApprovalAt?: string | null;
+  ownerApprovedAt?: string;
   booked?: Booked | null;
   meetUrl?: string | null;
   roomUrl?: string | null;
@@ -87,7 +91,7 @@ const STATUSES: readonly Status[] = ["offered", "booked", "dropped", "expired", 
 const FORMATS: readonly Format[] = ["meet", "in_person", "phone", "unknown"];
 const OUTCOMES: readonly Reminder["outcome"][] = ["sent", "cancelled", "no-link"];
 const PATCH_KEYS = [
-  "status", "chatUid", "eventId", "offered", "holdCleanup", "name", "location", "allowOverlap", "constraints", "topic", "pendingOwner", "ownerApprovalAt",
+  "status", "chatUid", "eventId", "offered", "holdCleanup", "name", "location", "allowOverlap", "constraints", "topic", "pendingOwner", "ownerApprovalAt", "ownerApprovedAt",
   "format", "locale", "booked", "meetUrl", "roomUrl", "reminder", "nudgedAt", "personNudgedAt",
 ];
 // Keys a patch can clear with null.
@@ -156,13 +160,14 @@ export function findByChat(ledger: Ledger, chatUid: string, handle?: string): Re
   // yet. This lets a replacement offer supersede a closed request in the chat.
   if (handle !== undefined) {
     const openForHandle = findOpenByHandle(ledger, handle);
-    if (openForHandle && openForHandle.ownerApprovalAt === undefined
+  if (openForHandle && (openForHandle.ownerApprovalAt === undefined || openForHandle.ownerApprovedAt !== undefined)
       && (openForHandle.chatUid === undefined || openForHandle.chatUid === chatUid)) {
       return openForHandle;
     }
   }
   // A chat remains a Meetly group after its request closes.
-  return ledger.requests.findLast((r) => r.chatUid === chatUid && r.status === "offered" && r.ownerApprovalAt === undefined)
+  return ledger.requests.findLast((r) => r.chatUid === chatUid && r.status === "offered"
+    && (r.ownerApprovalAt === undefined || r.ownerApprovedAt !== undefined))
     ?? ledger.requests.findLast((r) => r.chatUid === chatUid);
 }
 
@@ -200,7 +205,7 @@ export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: s
   const at = new Date(now).toISOString();
   // A new offer is never booked: a booking, its link and its reminder are
   // only ever set through update, where they are validated.
-  const { booked: _b, meetUrl: _m, roomUrl: _z, reminder: _r, closedAt: _c, nudgedAt: _n, personNudgedAt: _pn, ownerApprovalAt: _oa, log: _l, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "roomUrl" | "reminder" | "closedAt" | "nudgedAt" | "personNudgedAt" | "ownerApprovalAt" | "log">>;
+  const { booked: _b, meetUrl: _m, roomUrl: _z, reminder: _r, closedAt: _c, nudgedAt: _n, personNudgedAt: _pn, ownerApprovalAt: _oa, ownerApprovedAt: _oap, log: _l, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "roomUrl" | "reminder" | "closedAt" | "nudgedAt" | "personNudgedAt" | "ownerApprovalAt" | "ownerApprovedAt" | "log">>;
   const request: Request = { ...fields, format, id, status: "offered", offeredAt: at, createdAt: at, updatedAt: at };
   return { requests: [...ledger.requests, request] };
 }
@@ -211,7 +216,7 @@ export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: s
 export function saveRequest(ledger: Ledger, input: NewRequest, now: number, id: string): Ledger {
   const existing = findOpenByHandle(ledger, input.handle);
   if (!existing) return addRequest(ledger, input, now, id);
-  if (existing.ownerApprovalAt !== undefined) throw new Error(`request ${existing.id} is waiting for owner approval; do not replace or link its offer`);
+  if (existing.ownerApprovalAt !== undefined && existing.ownerApprovedAt === undefined) throw new Error(`request ${existing.id} is waiting for owner approval; do not replace or link its offer`);
 
   // Reuse addRequest's validation and timestamp behavior, then apply its new
   // offer to the existing record. An absent chatUid must not erase the link.
@@ -230,6 +235,7 @@ export function saveRequest(ledger: Ledger, input: NewRequest, now: number, id: 
     locale: input.locale ?? existing.locale,
     personNudgedAt: undefined,
     ownerApprovalAt: undefined,
+    ownerApprovedAt: undefined,
     holdCleanup,
     createdAt: existing.createdAt,
     updatedAt: new Date(now).toISOString(),
@@ -251,6 +257,7 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
     }
   }
   if (patch.ownerApprovalAt !== undefined && patch.ownerApprovalAt !== null && !isDate(patch.ownerApprovalAt)) throw new Error(`ownerApprovalAt must be a time, got ${JSON.stringify(patch.ownerApprovalAt)}`);
+  if (patch.ownerApprovedAt !== undefined && !isDate(patch.ownerApprovedAt)) throw new Error(`ownerApprovedAt must be a time, got ${JSON.stringify(patch.ownerApprovedAt)}`);
   if (patch.format !== undefined) checkFormat(patch.format);
   if (patch.locale !== undefined) checkLocale(patch.locale);
   if (patch.booked) checkBooked(patch.booked);
@@ -266,9 +273,10 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
   const index = ledger.requests.findIndex((r) => r.id === id);
   if (index < 0) throw new Error(`no request ${id}`);
   const currentRequest = ledger.requests[index]!;
-  if (currentRequest.ownerApprovalAt !== undefined) {
-    if (patch.chatUid !== undefined && patch.ownerApprovalAt !== null) {
-      throw new Error(`request ${id} is waiting for owner approval; chatUid can only be linked while clearing ownerApprovalAt`);
+  const approvalPending = currentRequest.ownerApprovalAt !== undefined && currentRequest.ownerApprovedAt === undefined;
+  if (approvalPending) {
+    if (patch.chatUid !== undefined && patch.ownerApprovedAt === undefined) {
+      throw new Error(`request ${id} is waiting for owner approval; chatUid cannot be linked before owner approval`);
     }
     if (patch.status === "booked" || patch.eventId !== undefined || patch.booked !== undefined) {
       throw new Error(`request ${id} is waiting for owner approval; it cannot be booked or attached to an event`);
@@ -329,7 +337,7 @@ export function pendingOwnerList(ledger: Ledger): Request[] {
 }
 
 export function ownerApprovalList(ledger: Ledger): Request[] {
-  return ledger.requests.filter((r) => r.status === "offered" && r.ownerApprovalAt !== undefined);
+  return ledger.requests.filter((r) => r.status === "offered" && r.ownerApprovalAt !== undefined && r.ownerApprovedAt === undefined);
 }
 
 // Booked Meets whose link is due in the group: from `leadMin` before the
@@ -349,7 +357,7 @@ export function cleanupList(ledger: Ledger): Request[] {
 // The spec's stages, derived from the ledger and never stored. "new" is a
 // request with no entry yet, and a person on the do-not-contact list has
 // their own list (blocklist.ts).
-export type Stage = "waiting_on_us" | "held" | "sent" | "waiting_on_them" | "confirmed" | "passed";
+export type Stage = "waiting_on_us" | "delivery_unknown" | "sent" | "waiting_on_them" | "confirmed" | "passed";
 
 // One request as the owner sees it in the pipeline: no chat uid, and a booking
 // only by its start and end.
@@ -359,6 +367,7 @@ export type PipelineItem = {
   topic: string;
   status: Status;
   stage: Stage;
+  delivery: "linked" | "unknown";
   nextStep: string;
   hoursWaiting?: number;
   booked?: { start: string; end: string };
@@ -372,7 +381,7 @@ const closedWhen = (r: Request) => r.closedAt ?? r.log?.at(-1)?.at ?? r.createdA
 
 const NEXT_STEP: Record<Stage, string> = {
   waiting_on_us: "owner decision needed",
-  held: "times are held but not delivered: check the group or send the offer again",
+  delivery_unknown: "delivery is unknown: check Messages manually; never resend",
   sent: "wait for their answer",
   waiting_on_them: "no answer in a day: suggest new times",
   confirmed: "none",
@@ -382,8 +391,8 @@ const NEXT_STEP: Record<Stage, string> = {
 export function stageOf(r: Request, now: number): Stage {
   if (r.status === "booked") return "confirmed";
   if (r.status !== "offered") return "passed";
-  if (r.pendingOwner || r.ownerApprovalAt) return "waiting_on_us";
-  if (!r.chatUid) return "held";
+  if (r.pendingOwner || (r.ownerApprovalAt && !r.ownerApprovedAt)) return "waiting_on_us";
+  if (!r.chatUid) return "delivery_unknown";
   return hoursSince(r.offeredAt, now) >= STALE_HOURS ? "waiting_on_them" : "sent";
 }
 
@@ -392,22 +401,23 @@ export function stageOf(r: Request, now: number): Stage {
 // first), meetings still to come (soonest first; one with no recorded time
 // last), and what closed in the past week.
 export function pipeline(ledger: Ledger, now: number): {
-  waitingOnOwner: PipelineItem[]; undelivered: PipelineItem[]; waitingOnThem: PipelineItem[]; booked: PipelineItem[]; closed: PipelineItem[];
+  waitingOnOwner: PipelineItem[]; deliveryUnknown: PipelineItem[]; waitingOnThem: PipelineItem[]; booked: PipelineItem[]; closed: PipelineItem[];
 } {
   const item = (r: Request, extra: Partial<PipelineItem> = {}): PipelineItem => {
     const stage = stageOf(r, now);
-    const out: PipelineItem = { id: r.id, topic: r.topic, status: r.status, stage, nextStep: NEXT_STEP[stage], ...extra };
+    const out: PipelineItem = { id: r.id, topic: r.topic, status: r.status, stage, delivery: r.chatUid ? "linked" : "unknown", nextStep: NEXT_STEP[stage], ...extra };
     if (r.name !== undefined) out.name = r.name;
     return out;
   };
-  const waiting = (r: Request) => ({ hoursWaiting: hoursSince(r.pendingOwner?.askedAt ?? r.ownerApprovalAt ?? r.offeredAt, now) });
+  const waiting = (r: Request) => ({ hoursWaiting: hoursSince(r.pendingOwner?.askedAt
+    ?? (r.ownerApprovedAt ? r.offeredAt : r.ownerApprovalAt ?? r.offeredAt), now) });
   const open = ledger.requests.filter((r) => r.status === "offered");
   const upcoming = ledger.requests.filter((r) => r.status === "booked" && (!r.booked || Date.parse(r.booked.start) >= now));
   const startOf = (r: Request) => (r.booked ? Date.parse(r.booked.start) : Infinity);
   const byStage = (stage: (r: Request) => boolean) => open.filter(stage).map((r) => item(r, waiting(r)));
   return {
     waitingOnOwner: byStage((r) => stageOf(r, now) === "waiting_on_us"),
-    undelivered: byStage((r) => stageOf(r, now) === "held").sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
+    deliveryUnknown: byStage((r) => stageOf(r, now) === "delivery_unknown").sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
     waitingOnThem: byStage((r) => ["sent", "waiting_on_them"].includes(stageOf(r, now))).sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
     booked: upcoming.sort((a, b) => startOf(a) - startOf(b)).map((r) => item(r, r.booked ? { booked: { start: r.booked.start, end: r.booked.end } } : {})),
     closed: ledger.requests.filter((r) => r.status !== "offered" && r.status !== "booked" && now - Date.parse(closedWhen(r)) <= WEEK)
@@ -416,29 +426,30 @@ export function pipeline(ledger: Ledger, now: number): {
 }
 
 export const OWNER_NUDGE_HOURS = 4;
-export const UNDELIVERED_NUDGE_HOURS = 1;
+export const DELIVERY_UNKNOWN_NOTICE_HOURS = 1;
 export const PERSON_NUDGE_HOURS = 24;
 
 // What waits on the owner or on Meetly for too long, to be reminded once per
 // ask. The other person is nudged once per offer; replacing an offer resets it.
 export function monitor(ledger: Ledger, now: number): {
-  ownerWaiting: (PipelineItem & { chatUid?: string })[]; undelivered: PipelineItem[]; waitingOnThem: (PipelineItem & { chatUid: string; handle: string })[];
+  ownerWaiting: (PipelineItem & { chatUid?: string })[]; deliveryUnknown: PipelineItem[]; waitingOnThem: (PipelineItem & { chatUid: string; handle: string })[];
 } {
-  const asked = (r: Request) => r.pendingOwner?.askedAt ?? r.ownerApprovalAt;
+  const asked = (r: Request) => r.pendingOwner?.askedAt ?? (r.ownerApprovedAt ? undefined : r.ownerApprovalAt);
   const due = (r: Request, since: string, hours: number) =>
     hoursSince(since, now) >= hours && (!r.nudgedAt || Date.parse(r.nudgedAt) < Date.parse(since));
   const personDue = (r: Request) => hoursSince(r.offeredAt, now) >= PERSON_NUDGE_HOURS &&
     (!r.personNudgedAt || Date.parse(r.personNudgedAt) < Date.parse(r.offeredAt));
   const view = (r: Request, since: string): PipelineItem => {
     const stage = stageOf(r, now);
-    return { id: r.id, ...(r.name !== undefined ? { name: r.name } : {}), topic: r.topic, status: r.status, stage, nextStep: NEXT_STEP[stage], hoursWaiting: hoursSince(since, now) };
+    return { id: r.id, ...(r.name !== undefined ? { name: r.name } : {}), topic: r.topic, status: r.status, stage,
+      delivery: r.chatUid ? "linked" : "unknown", nextStep: NEXT_STEP[stage], hoursWaiting: hoursSince(since, now) };
   };
   const open = ledger.requests.filter((r) => r.status === "offered");
   return {
     ownerWaiting: open.filter((r) => stageOf(r, now) === "waiting_on_us" && asked(r) && due(r, asked(r)!, OWNER_NUDGE_HOURS))
       .map((r) => ({ ...view(r, asked(r)!), ...(r.chatUid !== undefined ? { chatUid: r.chatUid } : {}) }))
       .sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
-    undelivered: open.filter((r) => stageOf(r, now) === "held" && due(r, r.offeredAt, UNDELIVERED_NUDGE_HOURS))
+    deliveryUnknown: open.filter((r) => stageOf(r, now) === "delivery_unknown" && due(r, r.offeredAt, DELIVERY_UNKNOWN_NOTICE_HOURS))
       .map((r) => view(r, r.offeredAt)).sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
     waitingOnThem: open.filter((r) => stageOf(r, now) === "waiting_on_them" && r.chatUid && personDue(r))
       .map((r) => ({ ...view(r, r.offeredAt), chatUid: r.chatUid!, handle: r.handle }))

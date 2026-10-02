@@ -158,10 +158,12 @@ and topic in the approval message; if more than one fits, ask which one.
   times are still free, open the group using the saved offer and its existing
   holds; do not run "Offer times" or `ledger.ts save` again. Keep
   `ownerApprovalAt` set while opening it, using idempotency key
-  `owner-gate:<id>`. Only after `start-thread.ts` confirms the group opened,
-  write `{"chatUid":"<uid>","ownerApprovalAt":null}` to a JSON file and
-  apply it in one `ledger.ts update --id <id> --json-file <file>`. If delivery
-  is unknown, keep the gate set and follow the no-retry rule. If any held time
+  `owner-gate:<id>`. After `start-thread.ts` returns either a chat uid or
+  `deliveryUnknown`, write `ownerApprovedAt: <now ISO>` to a JSON file and
+  include `chatUid` only when it returned one; apply the patch in one
+  `ledger.ts update --id <id> --json-file <file>`. This records the owner's
+  approval separately from delivery certainty. If delivery is unknown, leave
+  `chatUid` absent and follow the no-retry rule. If any held time
   is no longer free, do not send the stale
   options: clean the old holds (queue failed deletes in `holdCleanup`),
   calculate and save fresh options, set a new `ownerApprovalAt`, and ask the
@@ -184,12 +186,14 @@ When the owner asks who they are waiting on, or how their meetings stand,
 run `ledger.ts pipeline` and answer in their language, one short line per
 person: what the meeting is for, its `stage` and its `nextStep`. Stages:
 `waiting_on_us` (an out-of-hours time or inbound offer awaiting owner approval),
-`held` (times held but never delivered to a group: waiting on Meetly, not on
-the person), `sent` (offered less than a day ago), `waiting_on_them` (no
+`delivery_unknown` (no linked group; check Messages manually and never resend),
+`sent` (offered less than a day ago), `waiting_on_them` (no
 answer in a day or more, with the hours), `confirmed` (booked: day and time;
 for a booking with no time recorded: say its time is unavailable), and
-`passed` (closed in the past week). The next step is advice computed from the
-stage, never a claim about what happened. State only what the ledger says.
+`passed` (closed in the past week). The `delivery` field says whether the
+request has a linked group; `unknown` never means "never delivered" and never
+authorizes a retry. The next step is advice computed from the stage, never a
+claim about what happened. State only what the ledger says.
 Someone on the do-not-contact list has no stage: `blocklist.ts list`.
 
 ## What the log says
@@ -385,7 +389,8 @@ offer.
   requests, or the open handle match is linked to another chat. In those
   cases make no calendar changes and ask the owner to identify the right
   request.
-- If either lookup identifies an inbound request with `ownerApprovalAt`, the
+- If either lookup identifies an inbound request with `ownerApprovalAt` and
+  no `ownerApprovedAt`, the
   owner gate is still active. Do not link the chat, replace or update the
   offer, create holds, book, or send any message to the contact. Leave the
   ledger request untouched and tell the owner privately that this contact

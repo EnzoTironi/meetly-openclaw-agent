@@ -34,8 +34,9 @@ function sample(): Ledger {
 test("the pipeline says who is waiting on whom, how long, what is booked next and what just closed", () => {
   const p = pipeline(sample(), T0);
   assert.deepEqual(p.waitingOnOwner.map((i) => [i.id, i.hoursWaiting, i.stage]), [["r_ana", 5, "waiting_on_us"]]);
-  // Held but never delivered to a group: waiting on Meetly, not on the person.
-  assert.deepEqual(p.undelivered.map((i) => [i.id, i.hoursWaiting, i.stage]), [["r_bia", 30, "held"]]);
+  // No linked group is delivery-unknown: check manually and never retry.
+  assert.deepEqual(p.deliveryUnknown.map((i) => [i.id, i.hoursWaiting, i.stage, i.delivery, i.nextStep]),
+    [["r_bia", 30, "delivery_unknown", "unknown", "delivery is unknown: check Messages manually; never resend"]]);
   // Sent a day or more ago is waiting on them; sooner is just sent. Oldest first.
   assert.deepEqual(p.waitingOnThem.map((i) => [i.id, i.hoursWaiting, i.stage]), [["r_gus", 31, "waiting_on_them"], ["r_hal", 2, "sent"]]);
   // Upcoming only, soonest first; a meeting that already happened is not pipeline.
@@ -46,8 +47,8 @@ test("the pipeline says who is waiting on whom, how long, what is booked next an
   assert.deepEqual(p.closed.map((i) => [i.id, i.closedAt, i.stage]), [["r_edu", new Date(T0 - 2 * HOUR).toISOString(), "passed"]]);
   assert.equal(p.booked[0]!.stage, "confirmed");
   // The next step is advice computed from the stage, never stored.
-  assert.deepEqual([p.waitingOnOwner[0]!.nextStep, p.undelivered[0]!.nextStep, p.waitingOnThem[0]!.nextStep, p.waitingOnThem[1]!.nextStep],
-    ["owner decision needed", "times are held but not delivered: check the group or send the offer again", "no answer in a day: suggest new times", "wait for their answer"]);
+  assert.deepEqual([p.waitingOnOwner[0]!.nextStep, p.deliveryUnknown[0]!.nextStep, p.waitingOnThem[0]!.nextStep, p.waitingOnThem[1]!.nextStep],
+    ["owner decision needed", "delivery is unknown: check Messages manually; never resend", "no answer in a day: suggest new times", "wait for their answer"]);
   const ana = p.waitingOnOwner[0]!;
   assert.deepEqual([ana.name, ana.topic, ana.status], ["Ana", "intro call", "offered"]);
   // No chat uid reaches the model.
@@ -83,8 +84,8 @@ test("the CLI prints the pipeline and a person's history", () => {
   cli("ledger.ts", ["add", "--json", JSON.stringify(input("+15550000001", { name: "Ana" }))], env);
   const p = cli("ledger.ts", ["pipeline"], env);
   assert.equal(p.status, 0, p.stderr);
-  assert.deepEqual(Object.keys(p.json), ["waitingOnOwner", "undelivered", "waitingOnThem", "booked", "closed"]);
-  assert.equal(p.json.undelivered[0].name, "Ana");
+  assert.deepEqual(Object.keys(p.json), ["waitingOnOwner", "deliveryUnknown", "waitingOnThem", "booked", "closed"]);
+  assert.equal(p.json.deliveryUnknown[0].name, "Ana");
   const h = cli("ledger.ts", ["history", "--handle", "5550000001"], env);
   assert.equal(h.json.requests[0].topic, "coffee");
   assert.notEqual(cli("ledger.ts", ["history"], env).status, 0);
@@ -95,10 +96,11 @@ test("the owner can ask who they are waiting on, and Meetly looks before it asks
   assert.ok(group.includes("## Pipeline"));
   assert.ok(group.includes("run `ledger.ts pipeline`"));
   assert.ok(group.includes("for a booking with no time recorded: say its time is unavailable"));
-  assert.ok(group.includes("`held` (times held but never delivered to a group: waiting on Meetly, not on the person)"));
+  assert.ok(group.includes("`delivery_unknown` (no linked group; check Messages manually and never resend)"));
+  assert.ok(group.includes("`delivery` field says whether the request has a linked group"));
   assert.ok(group.includes("The next step is advice computed from the stage, never a claim about what happened"));
   assert.ok(group.includes("Write only what the calendar or the chat confirmed, never a plan or a guess"));
-  assert.ok(group.includes("`start-thread.ts` refuses to open a group with anyone on the list"));
+  assert.ok(group.includes("`start-thread.ts` checks the list again immediately before its POST"));
   assert.ok(group.includes("## Travel time"));
   assert.ok(group.includes("run `slots.ts` with `--travel <config.travelMin>`"));
   assert.ok(group.includes("record both in the offer's `travel[]`"));
@@ -143,12 +145,12 @@ test("a request keeps a dated log of what happened, newest last, bounded, and re
   assert.equal(cli("ledger.ts", ["log", "--id", id], env).json.log.length, 1);
 });
 
-test("the monitor lists old offers waiting on the owner, Meetly or the other person once", () => {
+test("the monitor lists owner decisions, unknown delivery warnings and contact nudges once", () => {
   const l = sample();
-  // Ana waited 5 h on the owner (a nudge is due after 4); Bia was held 30 h and never delivered (due after 1).
+  // Ana waits on the owner; Bia's group delivery is unknown (never retry).
   const m = monitor(l, T0);
   assert.deepEqual(m.ownerWaiting.map((i) => [i.id, i.hoursWaiting, i.chatUid, i.nextStep]), [["r_ana", 5, "c1", "owner decision needed"]]);
-  assert.deepEqual(m.undelivered.map((i) => [i.id, i.hoursWaiting]), [["r_bia", 30]]);
+  assert.deepEqual(m.deliveryUnknown.map((i) => [i.id, i.hoursWaiting, i.delivery]), [["r_bia", 30, "unknown"]]);
   assert.deepEqual(m.waitingOnThem.map((i) => [i.id, i.hoursWaiting, i.chatUid]), [["r_gus", 31, "c9"]]);
   // Too early, or waiting on them, closed or booked: nothing.
   assert.deepEqual(monitor(l, T0 - 2 * HOUR).ownerWaiting, []);
@@ -156,7 +158,7 @@ test("the monitor lists old offers waiting on the owner, Meetly or the other per
   assert.equal(JSON.stringify(none).includes("r_caio") || JSON.stringify(none).includes("r_edu"), false);
   // A nudge is sent once per ask: after it, nothing is due until the owner is asked again.
   const nudged = updateRequest(updateRequest(updateRequest(l, "r_ana", { nudgedAt: new Date(T0).toISOString() }, T0), "r_bia", { nudgedAt: new Date(T0).toISOString() }, T0), "r_gus", { personNudgedAt: new Date(T0).toISOString() }, T0);
-  assert.deepEqual([monitor(nudged, T0 + 10 * HOUR).ownerWaiting, monitor(nudged, T0 + 10 * HOUR).undelivered, monitor(nudged, T0 + 10 * HOUR).waitingOnThem], [[], [], []]);
+  assert.deepEqual([monitor(nudged, T0 + 10 * HOUR).ownerWaiting, monitor(nudged, T0 + 10 * HOUR).deliveryUnknown, monitor(nudged, T0 + 10 * HOUR).waitingOnThem], [[], [], []]);
   const asked = updateRequest(nudged, "r_ana", { pendingOwner: { start: "2026-10-04T22:00:00Z", end: "2026-10-04T22:30:00Z", askedAt: new Date(T0 + 1 * HOUR).toISOString() } }, T0 + 1 * HOUR);
   assert.deepEqual(monitor(asked, T0 + 6 * HOUR).ownerWaiting.map((i) => i.id), ["r_ana"]);
   assert.throws(() => updateRequest(l, "r_ana", { nudgedAt: "soon" }, T0), /nudgedAt/);
@@ -165,10 +167,12 @@ test("the monitor lists old offers waiting on the owner, Meetly or the other per
 test("the CLI prints the monitor, and the poll reminds the owner once, with advice and no claims", () => {
   const env = { MEETLY_HOME: tmpHome() };
   cli("ledger.ts", ["add", "--json", JSON.stringify(input("+15550000001", { name: "Ana" }))], env);
-  assert.deepEqual(cli("ledger.ts", ["monitor"], env).json, { ownerWaiting: [], undelivered: [], waitingOnThem: [] });
+  assert.deepEqual(cli("ledger.ts", ["monitor"], env).json, { ownerWaiting: [], deliveryUnknown: [], waitingOnThem: [] });
   const poll = flat("skills/meetly-poll/SKILL.md");
   assert.ok(poll.includes("Run `ledger.ts monitor`"));
   assert.ok(poll.includes("`ledger.ts update --id <id> --json '{\"nudgedAt\":\"<now ISO>\"}'` so it is sent once"));
-  assert.ok(poll.includes("never claim that anything happened"));
+  assert.ok(poll.includes("cannot confirm whether the group offer arrived"));
+  assert.ok(poll.includes("cannot confirm whether the group offer arrived"));
+  assert.ok(poll.includes("Do not open another group or send another offer"));
   assert.ok(poll.includes("Never contact the other person before approval"));
 });

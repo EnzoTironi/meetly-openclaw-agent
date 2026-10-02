@@ -85,10 +85,13 @@ still explain why no contact message was sent.
    - For each request from `ledger.ts expired`: delete its meeting and travel
      holds ("Holds" in `meetly-group`), then `ledger.ts update --id <id>
      --json '{"status":"expired","pendingOwner":null,"ownerApprovalAt":null}'`.
-     If it has a `chatUid`, tell the group the held times were released; this
-     also notifies the owner. If `ownerApprovalAt` was set and there is no
-     `chatUid`, tell the owner in their DM that the approval expired and the
-     holds were released. Never contact the other person before approval.
+     If it has a `chatUid`, check the blocklist then tell the group the held
+     times were released; this also notifies the owner. If `ownerApprovalAt`
+     was set, `ownerApprovedAt` is absent and there is no `chatUid`, tell the
+     owner in their DM that approval expired and the holds were released. If
+     `ownerApprovedAt` is set but there is no `chatUid`, tell the owner the
+     delivery is unknown, the holds expired and they must check Messages; do
+     not resend. Never contact the other person before approval.
    - Run `ledger.ts monitor`: it lists what waits on the owner, Meetly or the
      other person too long. For each `waitingOnThem` item, read the latest
      messages in that meeting thread first. If the person has already
@@ -106,11 +109,11 @@ still explain why no contact message was sent.
      `ownerWaiting` item without a `chatUid` and with `ownerApprovalAt`, remind
      the owner in their DM (`owner-chat.ts`) which person's held options await
      approval. For each
-     `undelivered` item, tell the owner in their DM that the times for
-     <name> are held but the group was never confirmed, and ask whether to
-     try again. Say only what the ledger says: never claim that anything
-     happened. After each reminder run `ledger.ts update --id <id> --json
-     '{"nudgedAt":"<now ISO>"}'` so it is sent once.
+     `deliveryUnknown` item, tell the owner in their DM that Meetly cannot
+     confirm whether the group offer arrived, ask them to check Messages
+     manually, and explicitly say never to resend. Do not open another group
+     or send another offer. After the warning run `ledger.ts update --id <id>
+     --json '{"nudgedAt":"<now ISO>"}'` so it is sent once.
    - For each request from `ledger.ts cleanup`: retry each delete, then
      update `holdCleanup` to what is still left (`[]` when none).
 7. If nothing happened, end silently.

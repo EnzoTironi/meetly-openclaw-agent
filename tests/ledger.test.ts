@@ -212,12 +212,20 @@ test("owner gate requests wait for owner approval and appear in the approvals li
   assert.equal(findByChat(l, "guest-chat", input().handle), undefined);
   assert.throws(() => saveRequest(l, input({ chatUid: "guest-chat" }), T0 + HOUR, "r_2"), /waiting for owner approval/);
   assert.throws(() => updateRequest(l, "r_1", { chatUid: "guest-chat" }, T0 + HOUR), /waiting for owner approval/);
-  assert.equal(monitor(l, T0 + 5 * HOUR).ownerWaiting[0]!.hoursWaiting, 5);
+  assert.deepEqual(
+    [monitor(l, T0 + 5 * HOUR).ownerWaiting[0]!.hoursWaiting, monitor(l, T0 + 5 * HOUR).ownerWaiting[0]!.delivery],
+    [5, "unknown"],
+  );
   assert.throws(() => updateRequest(l, "r_1", { ownerApprovalAt: "soon" }, T0), /ownerApprovalAt/);
-  l = updateRequest(l, "r_1", { chatUid: "approved-chat", ownerApprovalAt: null }, T0);
+  const approvedButUnknown = updateRequest(l, "r_1", { ownerApprovedAt: new Date(T0 + 6 * HOUR).toISOString() }, T0 + 6 * HOUR);
+  assert.equal(stageOf(approvedButUnknown.requests[0]!, T0 + 6 * HOUR), "delivery_unknown");
+  assert.equal(monitor(approvedButUnknown, T0 + 8 * HOUR).ownerWaiting.length, 0);
+  assert.deepEqual(monitor(approvedButUnknown, T0 + 8 * HOUR).deliveryUnknown.map((r) => r.id), ["r_1"]);
+  l = updateRequest(l, "r_1", { chatUid: "approved-chat", ownerApprovedAt: new Date(T0 + 6 * HOUR).toISOString() }, T0 + 6 * HOUR);
   assert.deepEqual(ownerApprovalList(l), []);
   assert.equal(findByChat(l, "approved-chat", input().handle)?.id, "r_1");
   assert.equal(stageOf(l.requests[0]!, T0), "sent");
+  assert.deepEqual(monitor(l, T0 + 10 * HOUR).deliveryUnknown, []);
 });
 
 test("CLI add, find, update, expired and cleanup round-trip", () => {
