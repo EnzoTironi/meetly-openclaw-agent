@@ -176,6 +176,12 @@ test("the format is read only from explicit words, and ambiguous ones are asked"
   assert.ok(group.includes("Always in that one message, never a second one"));
   assert.ok(group.includes("Never ask about the format twice in a row"));
   assert.ok(pollSkill().includes("the format if their words say it"));
+  // The owner's default fills in only what neither side said, in the poll too, and a default of in_person still asks where.
+  assert.ok(group.includes("Anything else is `config.defaultFormat` when the owner set one, otherwise `unknown`"));
+  assert.ok(group.includes("always wins over `config.defaultFormat`"));
+  assert.ok(group.includes("A default of `in_person` still asks where"));
+  assert.ok(pollSkill().includes("which also applies the owner's default"));
+  assert.ok(flat(readFileSync(join(ROOT, "skills/meetly-setup/SKILL.md"), "utf8")).includes("`record-setup.ts --field defaultFormat --value meet|in_person|phone`"));
 });
 
 test("every booking goes through Book the event: --with-meet, --json and record-booking.ts", () => {
