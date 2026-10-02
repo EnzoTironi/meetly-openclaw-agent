@@ -156,12 +156,13 @@ export function findByChat(ledger: Ledger, chatUid: string, handle?: string): Re
   // yet. This lets a replacement offer supersede a closed request in the chat.
   if (handle !== undefined) {
     const openForHandle = findOpenByHandle(ledger, handle);
-    if (openForHandle && (openForHandle.chatUid === undefined || openForHandle.chatUid === chatUid)) {
+    if (openForHandle && openForHandle.ownerApprovalAt === undefined
+      && (openForHandle.chatUid === undefined || openForHandle.chatUid === chatUid)) {
       return openForHandle;
     }
   }
   // A chat remains a Meetly group after its request closes.
-  return ledger.requests.findLast((r) => r.chatUid === chatUid && r.status === "offered")
+  return ledger.requests.findLast((r) => r.chatUid === chatUid && r.status === "offered" && r.ownerApprovalAt === undefined)
     ?? ledger.requests.findLast((r) => r.chatUid === chatUid);
 }
 
@@ -210,6 +211,7 @@ export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: s
 export function saveRequest(ledger: Ledger, input: NewRequest, now: number, id: string): Ledger {
   const existing = findOpenByHandle(ledger, input.handle);
   if (!existing) return addRequest(ledger, input, now, id);
+  if (existing.ownerApprovalAt !== undefined) throw new Error(`request ${existing.id} is waiting for owner approval; do not replace or link its offer`);
 
   // Reuse addRequest's validation and timestamp behavior, then apply its new
   // offer to the existing record. An absent chatUid must not erase the link.
@@ -263,6 +265,15 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
   }
   const index = ledger.requests.findIndex((r) => r.id === id);
   if (index < 0) throw new Error(`no request ${id}`);
+  const currentRequest = ledger.requests[index]!;
+  if (currentRequest.ownerApprovalAt !== undefined) {
+    if (patch.chatUid !== undefined && patch.ownerApprovalAt !== null) {
+      throw new Error(`request ${id} is waiting for owner approval; chatUid can only be linked while clearing ownerApprovalAt`);
+    }
+    if (patch.status === "booked" || patch.eventId !== undefined || patch.booked !== undefined) {
+      throw new Error(`request ${id} is waiting for owner approval; it cannot be booked or attached to an event`);
+    }
+  }
   const at = new Date(now).toISOString();
   const updated: Request = { ...ledger.requests[index]!, updatedAt: at };
   for (const [key, value] of Object.entries(patch)) {

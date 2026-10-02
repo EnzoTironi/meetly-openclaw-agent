@@ -150,10 +150,14 @@ and topic in the approval message; if more than one fits, ask which one.
 - **Yes:** re-read the calendar and run `slots.ts --at <start>` for every
   held time, passing that offer's meeting and travel hold ids with
   `--allow-overlap` (and `--travel <config.travelMin>` for in-person). If the
-  times are still free, clear the gate with `ledger.ts update --id <id> --json
-  '{"ownerApprovalAt":null}'`, then open the group using the ordinary
-  "Offer times" delivery steps with idempotency key `owner-gate:<id>` and save
-  its `chatUid`. If any held time is no longer free, do not send the stale
+  times are still free, open the group using the saved offer and its existing
+  holds; do not run "Offer times" or `ledger.ts save` again. Keep
+  `ownerApprovalAt` set while opening it, using idempotency key
+  `owner-gate:<id>`. Only after `start-thread.ts` confirms the group opened,
+  write `{"chatUid":"<uid>","ownerApprovalAt":null}` to a JSON file and
+  apply it in one `ledger.ts update --id <id> --json-file <file>`. If delivery
+  is unknown, keep the gate set and follow the no-retry rule. If any held time
+  is no longer free, do not send the stale
   options: clean the old holds (queue failed deletes in `holdCleanup`),
   calculate and save fresh options, set a new `ownerApprovalAt`, and ask the
   owner to approve those exact times.
@@ -368,6 +372,11 @@ offer.
   requests, or the open handle match is linked to another chat. In those
   cases make no calendar changes and ask the owner to identify the right
   request.
+- If either lookup identifies an inbound request with `ownerApprovalAt`, the
+  owner gate is still active. Do not link the chat, replace or update the
+  offer, create holds, book, or send any message to the contact. Leave the
+  ledger request untouched and tell the owner privately that this contact
+  reached an unapproved request.
 - **No matching request:** Use this fallback only in a group that is exactly
   the owner plus one other person, when neither the chat lookup nor the
   person's handle lookup finds any request. A closed (`dropped`, `expired` or
