@@ -7,6 +7,7 @@ import { applyGate, installGate } from "../boot/gate.ts";
 import gate, { gateContext, isOwnerDmTurn } from "../plugin/index.js";
 
 const status = (s: unknown) => JSON.stringify(s) + "\n";
+const DEFAULTS = { days: ["mon", "tue", "wed", "thu", "fri"], windowStart: "09:00", windowEnd: "18:00", durationMin: 30, horizonDays: 14 };
 
 test("only the owner's own DM user turn is gated", () => {
   assert.equal(isOwnerDmTurn({ channel: "plow", accountId: "chat", sessionKey: "agent:main:main", trigger: "user" }), true);
@@ -20,8 +21,8 @@ test("only the owner's own DM user turn is gated", () => {
   ]) assert.equal(isOwnerDmTurn(ctx), false, JSON.stringify(ctx));
 });
 
-test("unfinished setup tells the model to introduce Meetly and ask the current question, not an old one", () => {
-  const context = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: { ownerName: "Ana Lima" } }))!;
+test("a name or zone that could not be inferred is the only question, and not an old one", () => {
+  const context = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: { ownerName: "Ana Lima" }, defaults: DEFAULTS }))!;
   assert.match(context, /SETUP_NEEDED/);
   assert.match(context, /ignore any earlier setup question in the chat/);
   assert.match(context, /you are Meetly, their AI scheduling assistant/);
@@ -31,14 +32,30 @@ test("unfinished setup tells the model to introduce Meetly and ask the current q
   assert.match(context, /Do not run setup-status\.ts again this turn/);
 });
 
-test("without a name from Plow the gate does not invent one, and a finished draft asks for --done", () => {
-  const asking = gateContext(status({ status: "SETUP_NEEDED", next: "ownerName", question: "What name should I use?", draft: {} }))!;
+test("without a name from Plow the gate does not invent one", () => {
+  const asking = gateContext(status({ status: "SETUP_NEEDED", next: "ownerName", question: "What name should I use?", draft: {}, defaults: DEFAULTS }))!;
   assert.doesNotMatch(asking, /refer to them as/);
-  const days = gateContext(status({ status: "SETUP_NEEDED", next: "days", question: "Which days?", draft: { ownerName: "Ana" } }))!;
-  assert.match(days, /ask this question, translated into the owner's language, and end the turn: Which days\?/);
-  assert.match(days, /answers the days question, record it first with record-setup\.ts/);
-  const done = gateContext(status({ status: "SETUP_NEEDED", next: null, question: null, draft: { ownerName: "Ana" } }))!;
+  assert.match(asking, /and end the turn: What name should I use\?/);
+});
+
+test("once the name and zone are known the gate does not ask: it reads the calendars, finishes and does the owner's request", () => {
+  const context = gateContext(status({ status: "SETUP_NEEDED", next: "calendars", question: "Which of your calendars should count as busy?", draft: { ownerName: "Ana" }, defaults: DEFAULTS, mac: { connected: true } }))!;
+  assert.doesNotMatch(context, /and end the turn: Which of your calendars/);
+  assert.match(context, /Do not ask which calendars to use/);
+  assert.match(context, /selected: true/);
+  assert.match(context, /record-setup\.ts --done/);
+  assert.match(context, /carry out what the owner asked in this same turn/);
+  // The one line that introduces Meetly says what it does and the defaults it starts with.
+  assert.match(context, /you are Meetly, their AI scheduling assistant/);
+  assert.match(context, /mon,tue,wed,thu,fri, 09:00-18:00, 30-minute meetings, up to 14 days ahead/);
+  assert.match(context, /change any of it by saying so/);
+  assert.doesNotMatch(context, /a few questions/);
+});
+
+test("a finished draft asks for --done and then the owner's request", () => {
+  const done = gateContext(status({ status: "SETUP_NEEDED", next: null, question: null, draft: { ownerName: "Ana" }, defaults: DEFAULTS }))!;
   assert.match(done, /record-setup\.ts --done/);
+  assert.match(done, /carry out what the owner asked in this same turn/);
 });
 
 test("a finished setup is passed along, and output that is not a status adds nothing", () => {
@@ -71,7 +88,7 @@ test("preboot enables the gate with conversation access and replaces the volume'
 const LATCH = { connected: false, download: "https://plow.co/download/latch", about: "https://plow.co/latch" };
 
 test("with no Mac at the calendars question the gate explains Plow Latch with its link instead of asking", () => {
-  const context = gateContext(status({ status: "SETUP_NEEDED", next: "calendars", question: "Which of your calendars should count as busy?", draft: { ownerName: "Ana" }, mac: LATCH }))!;
+  const context = gateContext(status({ status: "SETUP_NEEDED", next: "calendars", question: "Which of your calendars should count as busy?", draft: { ownerName: "Ana" }, defaults: DEFAULTS, mac: LATCH }))!;
   assert.match(context, /Plow Latch/);
   assert.match(context, /https:\/\/plow\.co\/download\/latch/);
   assert.match(context, /https:\/\/plow\.co\/latch/);
@@ -80,9 +97,9 @@ test("with no Mac at the calendars question the gate explains Plow Latch with it
 });
 
 test("with no Mac at the time zone question the gate still asks it, and adds the Latch link", () => {
-  const context = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: { ownerName: "Ana" }, mac: LATCH }))!;
+  const context = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: { ownerName: "Ana" }, defaults: DEFAULTS, mac: LATCH }))!;
   assert.match(context, /and end the turn: What time zone are you in\?/);
   assert.match(context, /https:\/\/plow\.co\/download\/latch/);
-  const connected = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: {}, mac: { connected: true } }))!;
+  const connected = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: {}, defaults: DEFAULTS, mac: { connected: true } }))!;
   assert.doesNotMatch(connected, /plow\.co/);
 });

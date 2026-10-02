@@ -2,14 +2,14 @@
 // finishes setup with --done and registers the cron jobs.
 import { parseArgs } from "node:util";
 import { isMain, run } from "./cli.ts";
-import { isField, nextField, parseField, QUESTIONS, validateConfig, type Config, type Field } from "./config.ts";
+import { isField, nextField, parseField, QUESTIONS, validateConfig, type Config, type Field, type RequiredField } from "./config.ts";
 import { file } from "./paths.ts";
 import { readJson, removeFile, updateJson, withLock, writeJson } from "./store.ts";
 import { registerFromConfig } from "./register-crons.ts";
 
 export type Recorded =
   | { saved: Field; config: Config }
-  | { saved: Field; next: Field | null; question: string | null };
+  | { saved: Field; next: RequiredField | null; question: string | null };
 
 export function record(field: string, value: string): Recorded {
   if (!isField(field)) throw new Error(`unknown field: ${field}`);
