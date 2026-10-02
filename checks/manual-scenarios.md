@@ -32,11 +32,13 @@ Shortcuts:
 ## Scenarios
 
 1. [ ] **Setup through the DM.** Text the line as the owner.
-   - Expect: Meetly asks the seven questions one at a time, in your language,
-     and lists your calendars from the Mac.
-   - Expect: natural answers such as `9h-18h` and `weekdays` are accepted,
-     and a bad time zone is rejected in one line.
-   - Expect: it ends with a one-line confirmation.
+   - Expect: Meetly introduces itself in one line, with its defaults, and
+     asks nothing but your name and time zone, and only when Plow and the Mac
+     cannot supply them; the calendars are read from the Mac without a question.
+   - Expect: if your first message asked for a meeting, it is handled in the
+     same turn once setup finishes.
+   - Expect: later, natural changes such as `9h-18h` and `weekdays` are
+     accepted, and a bad time zone is rejected in one line.
    - Check: `m/setup-status.ts` prints `READY`.
 2. [ ] **The poll job is registered.** `oc cron list --all --json`
    - Expect: exactly one `meetly-poll`, enabled, every 5 min, isolated,

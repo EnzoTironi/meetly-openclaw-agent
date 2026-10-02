@@ -1,6 +1,6 @@
 ---
 name: meetly-setup
-description: Meetly's first-run questions in the owner's DM, and changing settings, pausing or resuming afterwards.
+description: Meetly's first run in the owner's DM (only what cannot be inferred is asked), and changing settings, pausing or resuming afterwards.
 ---
 # Meetly setup
 
@@ -8,37 +8,57 @@ Only in the owner's DM. Never ask setup questions anywhere else.
 
 ## First run
 
-1. Ask the `question` that `setup-status.ts` returns on this turn, translated
-   into the owner's language, one per message, then end the turn. A question asked
-   earlier in the chat is not the current one: always run the script and ask
-   what it returns now. The first setup message opens with one line saying you
-   are Meetly, their AI scheduling assistant, and that a few questions set you
-   up. `setup-status.ts` takes the owner's name from their Plow profile; when
+Setup asks only what nobody else can answer: the owner's name and time zone
+when Plow and the Mac cannot supply them, and the Mac itself. Everything else
+starts at the `defaults` in `setup-status.ts` and changes only when the owner
+says so. Never ask the days, hours, meeting length or horizon during setup, and
+never hold the owner's request waiting for them.
+
+1. Follow the gate's instructions for this turn. The first message opens with one
+   line saying you are Meetly, their AI scheduling assistant, what you do
+   (book their meetings from their calendar and reach people for them), the
+   defaults you start with, and that they can change any of it by saying so.
+   `setup-status.ts` takes the owner's name from their Plow profile; when
    `draft.ownerName` is set, that line also says the name you will use for
-   them with other people and that they can change it. If the owner asked for
-   something else, such as reaching someone, say in that line that you will do
-   it once setup is done.
-2. When the owner answers, normalize the answer and run
+   them with other people and that they can change it.
+2. When `next` is `ownerName` or `timezone`, ask that one question, translated
+   into the owner's language, then end the turn. A question asked earlier in
+   the chat is not the current one: always use what the gate or
+   `setup-status.ts` returns now. If the owner asked for something else, such
+   as reaching someone, say you will do it as soon as it is answered.
+3. When `next` is `calendars` and the Mac is connected, do not ask. Run
+   `plow-gog accounts` and `plow-gog calendar calendars` on the Mac (follow the
+   Mac's `google-workspace` skill for the exact commands). Record every
+   calendar with `selected: true` as the JSON
+   `{"defaultAccount": "<default account>", "calendars": [{"account": "…", "id": "…"}]}`.
+   The default account's primary calendar is added automatically (by the
+   account's address, the id `plow-gog calendar events` accepts), because
+   holds go there.
+4. When the owner answers a question, normalize the answer and run
    `node /opt/plow/skills/meetly/scripts/record-setup.ts --field <next> --value <v>`:
    - `ownerName` → the name as they gave it.
    - `timezone` → an IANA name, like `America/Sao_Paulo`.
    - `days` → a comma list like `mon,tue,wed`; "weekdays" means `mon,tue,wed,thu,fri`.
    - `window` → `HH:MM-HH:MM`.
    - `durationMin`, `horizonDays` → whole numbers.
-   - `calendars` → before asking, run `plow-gog accounts` and
-     `plow-gog calendar calendars` on the Mac (follow the Mac's
-     `google-workspace` skill for the exact commands). Show the calendars with
-     `selected: true` and suggest them. Record the JSON
-     `{"defaultAccount": "<default account>", "calendars": [{"account": "…", "id": "…"}]}`.
-     The default account's primary calendar is added automatically (by the
-     account's address, the id `plow-gog calendar events` accepts), because
-     holds go there.
-3. On a script error, say the problem in one line and ask again.
-4. When the output has `next: null`, run `record-setup.ts --done`. Then
-   confirm in one or two lines that Meetly is on: days, window, duration,
-   horizon. If `--done` fails, show its error line.
+   - `calendars` → as in step 3.
+5. On a script error, say the problem in one line and ask again.
+6. When the output has `next: null`, run `record-setup.ts --done`, then carry
+   out what the owner asked in this same turn. Confirm in one line that
+   Meetly is on, and which calendars count as busy. If `--done` fails, show its
+   error line.
 
-Never skip a question, invent an answer or fill one in from a guess.
+Never invent the name, the time zone or the calendars: they come from the
+owner, Plow or the Mac. The other settings start at their defaults and are
+never guessed from the chat.
+
+## Asking late, once
+
+When a request needs something the defaults do not settle (the length of an
+in-person meeting, a day the owner has not offered), ask that one thing then,
+in the request's own flow, never in setup. If the answer is a standing
+preference ("always 45 minutes", "I don't take meetings on Fridays"), record it
+with `record-setup.ts` so it is never asked again.
 
 ## What setup fills by itself
 

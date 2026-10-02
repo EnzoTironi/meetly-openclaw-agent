@@ -1,7 +1,7 @@
 // Is Meetly set up? READY with the config and the calendar range to read,
 // or SETUP_NEEDED with the next question.
 import { isMain, run } from "./cli.ts";
-import { nextField, QUESTIONS, readableCalendars, type Config, type Field } from "./config.ts";
+import { DEFAULTS, nextField, QUESTIONS, readableCalendars, type Config, type Field } from "./config.ts";
 import { ownerDisplayName } from "./owner-chat.ts";
 import { macTimezone } from "./mac-timezone.ts";
 import { LATCH_ABOUT_URL, LATCH_DOWNLOAD_URL, macConnected } from "./mac.ts";
@@ -13,7 +13,7 @@ import { localIso } from "./time.ts";
 export type MacStatus = { connected: true } | { connected: false; download: string; about: string };
 export type Status =
   | { status: "READY"; config: Config; range: { from: string; to: string } }
-  | { status: "SETUP_NEEDED"; next: Field | null; question: string | null; draft: Partial<Config>; mac?: MacStatus };
+  | { status: "SETUP_NEEDED"; next: Field | null; question: string | null; draft: Partial<Config>; defaults: typeof DEFAULTS; mac?: MacStatus };
 
 export function status(now: number = Date.now()): Status {
   const stored = readJson<Config | null>(file("config.json"), null);
@@ -25,7 +25,7 @@ export function status(now: number = Date.now()): Status {
   }
   const draft = readJson<Partial<Config>>(file("config.draft.json"), {});
   const next = nextField(draft) ?? null;
-  return { status: "SETUP_NEEDED", next, question: next ? QUESTIONS[next] : null, draft };
+  return { status: "SETUP_NEEDED", next, question: next ? QUESTIONS[next] : null, draft, defaults: DEFAULTS };
 }
 
 // Setup asks only what nobody else can answer. The owner's name is the one on

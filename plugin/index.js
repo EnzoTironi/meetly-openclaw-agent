@@ -50,18 +50,33 @@ export function gateContext(stdout) {
       `setup-status.ts output: ${JSON.stringify(status)}`,
     ].join("\n");
   }
+  // Only what nobody can infer is ever asked: the name and the zone, when Plow
+  // and the Mac could not answer them. The calendars are read from the Mac.
+  const asking = status.next === "ownerName" || status.next === "timezone";
+  const d = status.defaults;
+  const defaults = d
+    ? ` and that you start with ${d.days.join(",")}, ${d.windowStart}-${d.windowEnd}, ${d.durationMin}-minute meetings, up to ${d.horizonDays} days ahead, and they can change any of it by saying so`
+    : "";
   return [
     "Meetly setup check, already run for this turn (setup-status.ts): SETUP_NEEDED. Setup is not finished.",
     "Do not run setup-status.ts again this turn, and ignore any earlier setup question in the chat: this is the current state.",
     "Your reply, in the owner's language:",
-    "- If you have not introduced yourself in this conversation yet, open with one line: you are Meetly, their AI scheduling assistant, and a few questions set you up.",
+    `- If you have not introduced yourself in this conversation yet, open with one line: you are Meetly, their AI scheduling assistant, who books their meetings from their calendar and reaches people for them${defaults}.`,
     ...(name ? [`- In that line, say you will refer to them as ${name} when you talk to other people, and that they can change it.`] : []),
-    "- If the owner asked for something else, such as reaching someone, say you will do it once setup is done.",
     ...latch,
-    status.question
-      ? `- Then ask this question, translated into the owner's language, and end the turn: ${status.question}`
-      : "- Every answer is in: run record-setup.ts --done and confirm that Meetly is on, as meetly-setup says.",
-    `If the owner's message answers ${status.next ? `the ${status.next} question` : "a question"}, record it first with record-setup.ts (see meetly-setup) and ask the question it returns instead.`,
+    ...(asking
+      ? [
+        "- If the owner asked for something else, such as reaching someone, say you will do it as soon as this is answered.",
+        `- Then ask this question, translated into the owner's language, and end the turn: ${status.question}`,
+        `If the owner's message answers the ${status.next} question, record it first with record-setup.ts (see meetly-setup) and carry on from the status it returns.`,
+      ]
+      : [
+        ...(status.next === "calendars"
+          ? ["- Do not ask which calendars to use: read them from the Mac and record every calendar with selected: true, as meetly-setup says."]
+          : []),
+        "- Then run record-setup.ts --done, and carry out what the owner asked in this same turn.",
+        "- If the owner asked for nothing yet, add one short line: tell me who to meet.",
+      ]),
     `setup-status.ts output: ${JSON.stringify(status)}`,
   ].join("\n");
 }
