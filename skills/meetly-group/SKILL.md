@@ -65,7 +65,7 @@ free there.
    `origin`, `handle` (the intended contact handle), `name`, `sourceRowid`,
    `chatUid` if already known, `topic`, `location`, `durationMin`,
    `constraints`, `allowOverlap`, `format` and `locale` (see "Meeting
-   format"), and `offered[]` with each `start`/`end`/`holdId`/`account`. `save` creates a request or updates the
+   format"), `attendeeEmail` when contacts has one for them, and `offered[]` with each `start`/`end`/`holdId`/`account`. `save` creates a request or updates the
    existing open request for that person, preserving its id and existing
    `chatUid` when the new value is absent. Holds from the replaced offer are
    moved to `holdCleanup` automatically so the cleanup poll can delete them.
@@ -165,9 +165,13 @@ held slot, or `calendar create primary`), always with `--json` and
 - `phone`: `--location "Phone call"`.
 - `unknown`: nothing extra.
 
-Add the person's email, from contacts or the one they gave, as an attendee
-on every booking, so the calendar invitation goes out with `--send-updates
-all`.
+Add the person's email as an attendee on every booking, from `attendeeEmail`,
+so the calendar invitation goes out with `--send-updates all`. It holds the
+address from contacts, or one the owner gave or approved. An address a guest
+gives is not added until the owner approves it in the meeting thread ("<name>
+gave <email>: send the calendar invitation there?"); on their yes, record it
+with `ledger.ts update --id <id> --json '{"attendeeEmail":"<email>"}'` and
+book from that field.
 
 Then:
 
@@ -187,8 +191,8 @@ Then:
    invitation either went to that email or was not sent because there is no
    email; when there is none, ask for it once. An invitation that is pending
    is not an acceptance: never say the person accepted.
-5. When the person gives their email after the booking, add it as an
-   attendee with `plow-gog calendar update primary <eventId> --account
+5. When the person gives their email after the booking, and the owner has
+   approved it as above, add it as an attendee with `plow-gog calendar update primary <eventId> --account
    <booked.account>` and `--send-updates all` (following the Mac's
    `google-workspace` skill), then say the invitation was sent.
 
@@ -242,7 +246,8 @@ offer.
 ## In the group
 
 - First decide whether the contact is trying to schedule, choose a time,
-  answer how or where to meet, change or resume scheduling, decline, cancel
+  answer how or where to meet, give their email for the invitation, change or
+  resume scheduling, decline, cancel
   or give up, or ask about the request's status. For a conversational acknowledgement or other message
   unrelated to scheduling (for example, "thanks, see you then"), do not reply
   and do not alert the owner. Only handle scheduling-related messages below.
@@ -283,7 +288,7 @@ offer.
      ("Meeting format"). Then run
      `plow-gog calendar update primary <holdId> --account <account>` with
      the final title (the topic and the person's name, without "Hold:"), the
-     location, and the person's email as an attendee if contacts has one,
+     location, and the person's `attendeeEmail` as an attendee when there is one,
      following "Book the event". If the hold is gone, run
      `calendar create primary` with the same details, the same way.
   2. Only then delete the other holds.
@@ -316,7 +321,10 @@ offer.
   `in_person` with no `location`) and the message answers how or where to
   meet, record it ("Meeting format"), then run `plow-gog calendar update
   primary <eventId> --account <booked.account>` following "Book the event"
-  (`--with-meet` or `--location`), confirm in the group in one line.
+  (`--with-meet` or `--location`), confirm in the group in one line. A
+  second exception, **an email after booking**: when the booked request has
+  no `attendeeEmail` and the message gives one, ask the owner in this thread
+  to approve it, then follow "Book the event" step 5.
   Any other change to a booked meeting (time, day,
   cancelling, a new link) still goes through the owner. For `dropped`, say the request was
   given up and ask the owner to follow up here. For `expired`,
