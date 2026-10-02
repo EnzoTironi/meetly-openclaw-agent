@@ -84,6 +84,10 @@ Everything else starts at these defaults:
 - meeting length: 30 minutes,
 - offers up to 14 days ahead.
 
+One more setting has no default: your default meeting type (online, in person
+or phone). Say "always online" and Meetly stops asking how to meet; whatever a
+request says still wins.
+
 Change any of it later in plain words ("make my window 10 to 17", "I don't
 take meetings on Fridays"), or say "pause Meetly" / "resume Meetly".
 

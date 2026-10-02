@@ -169,7 +169,7 @@ test("the format is read only from explicit words, and ambiguous ones are asked"
   const group = groupSkill();
   assert.ok(group.includes("## Meeting format"));
   assert.ok(group.includes("It counts only when the words say it"));
-  assert.ok(group.includes("Anything else is `unknown`, including \"call\", \"ligação\""));
+  assert.ok(group.includes("otherwise `unknown`, including \"call\", \"ligação\""));
   assert.ok(group.includes("\"coffee\" or \"lunch\" with no place"));
   assert.ok(group.includes("Never guess from the topic"));
   assert.ok(group.includes("When `format` is `unknown`, the same opener also asks how they would like to meet"));
