@@ -71,6 +71,12 @@ free there.
    offer. If any deletion fails, report those hold ids too.
 6. Deliver the times:
    - An open request that already has a `chatUid`: post the new times there.
+     From the owner's main DM use `plow_reply_to` with that `chatUid` and the
+     new times; in the poll use `message` with that chat uid as its target;
+     in the group itself reply normally. Say the new times were sent only
+     after that send succeeded. If it fails, tell the owner the specific
+     error in one line and that the holds and the saved offer are kept;
+     never say the request was updated or sent.
    - Otherwise open a group with the person's handle and the opener: run
      `start-thread.ts --member <handle> --body <opener> --key <key>`, with key
      `rowid:<sourceRowid>` in the poll and `owner:<handle>:<first offered
@@ -119,7 +125,8 @@ In the owner's DM:
 4. If `ledger.ts find --handle <handle>` has an open request, reuse its group
    ("Offer times" step 5).
 5. Follow "Offer times" with `origin: owner`.
-6. Reply to the owner in one line: group opened, times offered and held.
+6. Reply to the owner in one line: the group opened, or for an existing group
+   the new times sent to that group, and the times held.
 
 ## Meeting format
 
