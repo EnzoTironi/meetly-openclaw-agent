@@ -140,10 +140,17 @@ lunch with Ana", "remove all my appointments today", "move the call to 3pm"):
    read from:
    - **Cancel:** `plow-gog calendar delete primary <eventId> --send-updates
      all --force --account <account>`. Then `ledger.ts update --id <id>
-     --json '{"status":"cancelled","pendingOwner":null}'`.
+     --json '{"status":"cancelled","pendingOwner":null}'`. If the delete
+     fails, change nothing else, tell the owner and send nothing to the
+     group.
    - **Move:** `plow-gog calendar update primary <eventId> --from <start>
      --to <end> --send-updates all --account <account> --json`, then
      record it as in "Book the event" steps 1 and 2.
+   - If a step after the calendar change fails, retry it once in this turn,
+     and still send the group message (step 4). If it still fails, tell the
+     owner exactly which steps are left and for which meeting. A deleted
+     event left `booked` gets no reminder: `reminder-check.ts` reads the
+     live event and sees it cancelled.
 4. Then tell them in their group (the request's `chatUid`), in one line, in
    their language and in the third person: the owner cancelled (or moved)
    the meeting, its day and time, and for a move the new time. Give no

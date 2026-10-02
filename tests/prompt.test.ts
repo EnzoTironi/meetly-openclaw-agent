@@ -238,6 +238,10 @@ test("an owner who cancels or moves a booked meeting has Meetly tell the other p
   assert.ok(group.includes("'{\"status\":\"cancelled\",\"pendingOwner\":null}'"));
   assert.ok(group.includes("tell them in their group (the request's `chatUid`)"));
   assert.ok(group.includes("A Google cancellation email is not a message from Meetly"));
+  // A failed step after the calendar change is retried, the group still hears, and the owner learns what is left.
+  assert.ok(group.includes("If the delete fails, change nothing else, tell the owner and send nothing to the group"));
+  assert.ok(group.includes("retry it once in this turn, and still send the group message"));
+  assert.ok(group.includes("tell the owner exactly which steps are left"));
   assert.ok(group.includes("For `cancelled`, say the owner cancelled that meeting"));
   // The owner's own instruction covering the meeting is the approval; ask at most once.
   assert.ok(group.includes("\"all\", \"everything today\""));

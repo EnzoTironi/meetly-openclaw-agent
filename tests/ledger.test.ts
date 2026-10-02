@@ -227,8 +227,11 @@ test("an owner cancellation finds the booked request by its event id and closes 
 test("CLI find --event returns the request booked as that event", () => {
   const env = { MEETLY_HOME: tmpHome() };
   const id = cli("ledger.ts", ["add", "--json", JSON.stringify(input({ chatUid: "c1" }))], env).json.request.id;
+  // A booking with no recorded account never matches: the lookup fails closed.
   cli("ledger.ts", ["update", "--id", id, "--json", '{"status":"booked","eventId":"ev_1"}'], env);
-  // A booking recorded before `booked` existed has no account: its event id alone identifies it.
+  assert.deepEqual(cli("ledger.ts", ["find", "--event", "ev_1", "--account", "a@example.com"], env).json, { request: null });
+  const booked = { start: offer.start, end: offer.end, account: "a@example.com" };
+  cli("ledger.ts", ["update", "--id", id, "--json", JSON.stringify({ booked })], env);
   assert.equal(cli("ledger.ts", ["find", "--event", "ev_1", "--account", "a@example.com"], env).json.request.id, id);
   assert.deepEqual(cli("ledger.ts", ["find", "--event", "ev_2", "--account", "a@example.com"], env).json, { request: null });
   assert.notEqual(cli("ledger.ts", ["find", "--event", "ev_1"], env).status, 0, "--event needs --account");

@@ -140,9 +140,9 @@ export function findByChat(ledger: Ledger, chatUid: string, handle?: string): Re
 
 // The request booked as this calendar event on this account: how an owner's
 // cancel or move of an event finds the person and group to tell. A booking
-// recorded before `booked` existed has no account and matches on its id.
+// with no recorded account never matches.
 export function findByEvent(ledger: Ledger, eventId: string, account: string): Request | undefined {
-  return ledger.requests.findLast((r) => r.eventId === eventId && (r.booked === undefined || r.booked.account === account));
+  return ledger.requests.findLast((r) => r.eventId === eventId && r.booked?.account === account);
 }
 
 function checkOffers(offered: unknown): Offer[] {
