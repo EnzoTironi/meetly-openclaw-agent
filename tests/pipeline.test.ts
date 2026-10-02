@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { addRequest, historyFor, pipeline, updateRequest, type Ledger, type NewRequest } from "../skills/meetly/scripts/ledger.ts";
+import { addRequest, appendLog, historyFor, pipeline, updateRequest, type Ledger, type NewRequest } from "../skills/meetly/scripts/ledger.ts";
 import { cli, tmpHome } from "./helpers.ts";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -26,19 +26,28 @@ function sample(): Ledger {
   l = updateRequest(l, "r_edu", { status: "expired" }, T0 - 2 * HOUR);
   l = addRequest(l, input("+15550000006", { name: "Fabi", topic: "old" }), T0 - 400 * HOUR, "r_fabi");
   l = updateRequest(l, "r_fabi", { status: "dropped" }, T0 - 300 * HOUR);
+  l = addRequest(l, input("+15550000007", { name: "Gus", topic: "pitch", chatUid: "c9" }), T0 - 31 * HOUR, "r_gus");
+  l = addRequest(l, input("+15550000008", { name: "Hal", topic: "intro", chatUid: "c8" }), T0 - 2 * HOUR, "r_hal");
   return l;
 }
 
 test("the pipeline says who is waiting on whom, how long, what is booked next and what just closed", () => {
   const p = pipeline(sample(), T0);
-  assert.deepEqual(p.waitingOnOwner.map((i) => [i.id, i.hoursWaiting]), [["r_ana", 5]]);
-  assert.deepEqual(p.waitingOnThem.map((i) => [i.id, i.hoursWaiting]), [["r_bia", 30]]);
+  assert.deepEqual(p.waitingOnOwner.map((i) => [i.id, i.hoursWaiting, i.stage]), [["r_ana", 5, "waiting_on_us"]]);
+  // Held but never delivered to a group: waiting on Meetly, not on the person.
+  assert.deepEqual(p.undelivered.map((i) => [i.id, i.hoursWaiting, i.stage]), [["r_bia", 30, "held"]]);
+  // Sent a day or more ago is waiting on them; sooner is just sent. Oldest first.
+  assert.deepEqual(p.waitingOnThem.map((i) => [i.id, i.hoursWaiting, i.stage]), [["r_gus", 31, "waiting_on_them"], ["r_hal", 2, "sent"]]);
   // Upcoming only, soonest first; a meeting that already happened is not pipeline.
   assert.deepEqual(p.booked.map((i) => i.id), ["r_caio"]);
   // Only the booking's start and end: no calendar account.
   assert.deepEqual(p.booked[0]!.booked, { start: "2026-10-05T15:00:00Z", end: "2026-10-05T15:30:00Z" });
   // Closed within the last week, newest first, with when it closed.
-  assert.deepEqual(p.closed.map((i) => [i.id, i.closedAt]), [["r_edu", new Date(T0 - 2 * HOUR).toISOString()]]);
+  assert.deepEqual(p.closed.map((i) => [i.id, i.closedAt, i.stage]), [["r_edu", new Date(T0 - 2 * HOUR).toISOString(), "passed"]]);
+  assert.equal(p.booked[0]!.stage, "confirmed");
+  // The next step is advice computed from the stage, never stored.
+  assert.deepEqual([p.waitingOnOwner[0]!.nextStep, p.undelivered[0]!.nextStep, p.waitingOnThem[0]!.nextStep, p.waitingOnThem[1]!.nextStep],
+    ["owner decision needed", "times are held but not delivered: check the group or send the offer again", "no answer in a day: suggest new times", "wait for their answer"]);
   const ana = p.waitingOnOwner[0]!;
   assert.deepEqual([ana.name, ana.topic, ana.status], ["Ana", "intro call", "offered"]);
   // No chat uid reaches the model.
@@ -74,8 +83,8 @@ test("the CLI prints the pipeline and a person's history", () => {
   cli("ledger.ts", ["add", "--json", JSON.stringify(input("+15550000001", { name: "Ana" }))], env);
   const p = cli("ledger.ts", ["pipeline"], env);
   assert.equal(p.status, 0, p.stderr);
-  assert.deepEqual(Object.keys(p.json), ["waitingOnOwner", "waitingOnThem", "booked", "closed"]);
-  assert.equal(p.json.waitingOnThem[0].name, "Ana");
+  assert.deepEqual(Object.keys(p.json), ["waitingOnOwner", "undelivered", "waitingOnThem", "booked", "closed"]);
+  assert.equal(p.json.undelivered[0].name, "Ana");
   const h = cli("ledger.ts", ["history", "--handle", "5550000001"], env);
   assert.equal(h.json.requests[0].topic, "coffee");
   assert.notEqual(cli("ledger.ts", ["history"], env).status, 0);
@@ -85,11 +94,37 @@ test("the owner can ask who they are waiting on, and Meetly looks before it asks
   const group = flat("skills/meetly-group/SKILL.md");
   assert.ok(group.includes("## Pipeline"));
   assert.ok(group.includes("run `ledger.ts pipeline`"));
-  assert.ok(group.includes("next step is advice, never a claim about what happened"));
-  assert.ok(group.includes("a booking with no time recorded: say its time is unavailable"));
+  assert.ok(group.includes("for a booking with no time recorded: say its time is unavailable"));
+  assert.ok(group.includes("`held` (times held but never delivered to a group: waiting on Meetly, not on the person)"));
+  assert.ok(group.includes("The next step is advice computed from the stage, never a claim about what happened"));
+  assert.ok(group.includes("Write only what the calendar or the chat confirmed, never a plan or a guess"));
+  assert.ok(group.includes("`start-thread.ts` refuses to open a group with anyone on the list"));
+  assert.ok(flat("skills/meetly-poll/SKILL.md").includes("`blocklist.ts check --handle <sender>` says `blocked`, skip"));
   assert.ok(group.includes("## Before you ask the other person"));
   assert.ok(group.includes("run `ledger.ts history --handle <their handle>`"));
   assert.ok(group.includes("Never ask the other person for something you can find"));
   assert.ok(flat("prompt/AGENTS.md").includes("the owner asks who they are waiting on, or how their meetings stand → `meetly-group`, \"Pipeline\""));
   assert.ok(flat("skills/meetly/SKILL.md").includes("`pipeline` \\| `history --handle H`"));
+});
+
+test("a request keeps a dated log of what happened, newest last, bounded, and read back on its own", () => {
+  let l = addRequest({ requests: [] }, input("+15550000001", { name: "Ana" }), T0, "r_ana");
+  l = appendLog(l, "r_ana", "  Times sent to the group  ", T0 + HOUR);
+  l = appendLog(l, "r_ana", "She picked Tuesday", T0 + 2 * HOUR);
+  assert.deepEqual(l.requests[0]!.log, [
+    { at: new Date(T0 + HOUR).toISOString(), text: "Times sent to the group" },
+    { at: new Date(T0 + 2 * HOUR).toISOString(), text: "She picked Tuesday" },
+  ]);
+  assert.throws(() => appendLog(l, "r_ana", "   ", T0), /log text/);
+  assert.throws(() => appendLog(l, "r_ana", "x".repeat(301), T0), /log text/);
+  assert.throws(() => appendLog(l, "nope", "hi", T0), /no request/);
+  for (let i = 0; i < 40; i++) l = appendLog(l, "r_ana", `entry ${i}`, T0 + (3 + i) * HOUR);
+  assert.equal(l.requests[0]!.log!.length, 30);
+  assert.equal(l.requests[0]!.log!.at(-1)!.text, "entry 39");
+  // The history for the model carries no log; it is read with `ledger.ts log --id`.
+  assert.equal("log" in historyFor(l, "+15550000001")[0]!, false);
+  const env = { MEETLY_HOME: tmpHome() };
+  const id = cli("ledger.ts", ["add", "--json", JSON.stringify(input("+15550000001"))], env).json.request.id;
+  assert.equal(cli("ledger.ts", ["log", "--id", id, "--text", "Offer sent"], env).json.log[0].text, "Offer sent");
+  assert.equal(cli("ledger.ts", ["log", "--id", id], env).json.log.length, 1);
 });

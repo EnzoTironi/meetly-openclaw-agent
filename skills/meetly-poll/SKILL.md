@@ -60,7 +60,8 @@ with no meeting thread, use `owner-chat.ts` and target the printed `chatUid`.
       marketing, automated senders, mentions of something already booked,
       and anything unclear.
    3. If the owner replied after the request, skip: the owner is handling it.
-   4. If `ledger.ts find --handle <sender>` has an open request, skip.
+   4. If `ledger.ts find --handle <sender>` has an open request, skip. If
+      `blocklist.ts check --handle <sender>` says `blocked`, skip.
    5. Run `cursor.ts hold <the request's rowid>` (the same rowid you pass as
       `sourceRowid`) before anything else. Until the ledger records a request
       with that `sourceRowid`, `cursor.ts set` stops just below it, so a run

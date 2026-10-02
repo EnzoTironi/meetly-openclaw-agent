@@ -49,14 +49,20 @@ export type Request = {
   offeredAt: string;
   // When it stopped being open (dropped, expired, ...), so later bookkeeping does not move it.
   closedAt?: string;
+  // What happened and was confirmed, dated, oldest first (the last LOG_MAX).
+  log?: LogEntry[];
   createdAt: string;
   updatedAt: string;
 };
 
+export type LogEntry = { at: string; text: string };
+const LOG_MAX = 30;
+const LOG_TEXT_MAX = 300;
+
 export type Ledger = { requests: Request[] };
 
 export type NewRequest = Omit<Request,
-  "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "booked" | "meetUrl" | "reminder" | "offeredAt" | "closedAt" | "createdAt" | "updatedAt">;
+  "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "booked" | "meetUrl" | "reminder" | "offeredAt" | "closedAt" | "log" | "createdAt" | "updatedAt">;
 export type Patch = Partial<Pick<Request,
   "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic" | "format" | "locale">> & {
   pendingOwner?: PendingOwner | null;
@@ -165,7 +171,7 @@ export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: s
   const at = new Date(now).toISOString();
   // A new offer is never booked: a booking, its link and its reminder are
   // only ever set through update, where they are validated.
-  const { booked: _b, meetUrl: _m, reminder: _r, closedAt: _c, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "reminder" | "closedAt">>;
+  const { booked: _b, meetUrl: _m, reminder: _r, closedAt: _c, log: _l, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "reminder" | "closedAt" | "log">>;
   const request: Request = { ...fields, format, id, status: "offered", offeredAt: at, createdAt: at, updatedAt: at };
   return { requests: [...ledger.requests, request] };
 }
@@ -245,6 +251,20 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
   return { requests };
 }
 
+// One dated line of what happened. It is written only after the calendar or
+// the chat confirmed it, and the log is bounded: the oldest lines go first.
+export function appendLog(ledger: Ledger, id: string, text: string, now: number): Ledger {
+  const line = typeof text === "string" ? text.trim() : "";
+  if (!line || line.length > LOG_TEXT_MAX) throw new Error(`the log text must be 1 to ${LOG_TEXT_MAX} characters`);
+  const index = ledger.requests.findIndex((r) => r.id === id);
+  if (index < 0) throw new Error(`no request ${id}`);
+  const at = new Date(now).toISOString();
+  const requests = [...ledger.requests];
+  const r = requests[index]!;
+  requests[index] = { ...r, log: [...(r.log ?? []), { at, text: line }].slice(-LOG_MAX), updatedAt: at };
+  return { requests };
+}
+
 export function expiredRequests(ledger: Ledger, hours: number, now: number): Request[] {
   return ledger.requests.filter((r) => r.status === "offered" && now - Date.parse(r.offeredAt) >= hours * 3600_000);
 }
@@ -268,6 +288,11 @@ export function cleanupList(ledger: Ledger): Request[] {
   return ledger.requests.filter((r) => (r.holdCleanup?.length ?? 0) > 0);
 }
 
+// The spec's stages, derived from the ledger and never stored. "new" is a
+// request with no entry yet, and a person on the do-not-contact list has
+// their own list (blocklist.ts).
+export type Stage = "waiting_on_us" | "held" | "sent" | "waiting_on_them" | "confirmed" | "passed";
+
 // One request as the owner sees it in the pipeline: no chat uid, and a booking
 // only by its start and end.
 export type PipelineItem = {
@@ -275,33 +300,57 @@ export type PipelineItem = {
   name?: string;
   topic: string;
   status: Status;
+  stage: Stage;
+  nextStep: string;
   hoursWaiting?: number;
   booked?: { start: string; end: string };
   closedAt?: string;
 };
 
+export const STALE_HOURS = 24;
 const WEEK = 7 * 24 * 3600_000;
 const hoursSince = (iso: string, now: number) => Math.max(0, Math.floor((now - Date.parse(iso)) / 3600_000));
 const closedWhen = (r: Request) => r.closedAt ?? r.updatedAt;
 
-// Who is waiting on whom: offers the owner has to approve, offers the other
-// person has to answer (oldest first), meetings still to come (soonest
-// first; one with no recorded time last), and what closed in the past week.
+const NEXT_STEP: Record<Stage, string> = {
+  waiting_on_us: "owner decision needed",
+  held: "times are held but not delivered: check the group or send the offer again",
+  sent: "wait for their answer",
+  waiting_on_them: "no answer in a day: suggest new times",
+  confirmed: "none",
+  passed: "none, unless the owner wants to meet again",
+};
+
+export function stageOf(r: Request, now: number): Stage {
+  if (r.status === "booked") return "confirmed";
+  if (r.status !== "offered") return "passed";
+  if (r.pendingOwner) return "waiting_on_us";
+  if (!r.chatUid) return "held";
+  return hoursSince(r.offeredAt, now) >= STALE_HOURS ? "waiting_on_them" : "sent";
+}
+
+// Who is waiting on whom: offers the owner has to approve, offers held but not
+// delivered (waiting on Meetly), offers the other person has to answer (oldest
+// first), meetings still to come (soonest first; one with no recorded time
+// last), and what closed in the past week.
 export function pipeline(ledger: Ledger, now: number): {
-  waitingOnOwner: PipelineItem[]; waitingOnThem: PipelineItem[]; booked: PipelineItem[]; closed: PipelineItem[];
+  waitingOnOwner: PipelineItem[]; undelivered: PipelineItem[]; waitingOnThem: PipelineItem[]; booked: PipelineItem[]; closed: PipelineItem[];
 } {
   const item = (r: Request, extra: Partial<PipelineItem> = {}): PipelineItem => {
-    const out: PipelineItem = { id: r.id, topic: r.topic, status: r.status, ...extra };
+    const stage = stageOf(r, now);
+    const out: PipelineItem = { id: r.id, topic: r.topic, status: r.status, stage, nextStep: NEXT_STEP[stage], ...extra };
     if (r.name !== undefined) out.name = r.name;
     return out;
   };
+  const waiting = (r: Request) => ({ hoursWaiting: hoursSince(r.pendingOwner ? r.pendingOwner.askedAt : r.offeredAt, now) });
   const open = ledger.requests.filter((r) => r.status === "offered");
   const upcoming = ledger.requests.filter((r) => r.status === "booked" && (!r.booked || Date.parse(r.booked.start) >= now));
   const startOf = (r: Request) => (r.booked ? Date.parse(r.booked.start) : Infinity);
+  const byStage = (stage: (r: Request) => boolean) => open.filter(stage).map((r) => item(r, waiting(r)));
   return {
-    waitingOnOwner: open.filter((r) => r.pendingOwner).map((r) => item(r, { hoursWaiting: hoursSince(r.pendingOwner!.askedAt, now) })),
-    waitingOnThem: open.filter((r) => !r.pendingOwner).map((r) => item(r, { hoursWaiting: hoursSince(r.offeredAt, now) }))
-      .sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
+    waitingOnOwner: byStage((r) => stageOf(r, now) === "waiting_on_us"),
+    undelivered: byStage((r) => stageOf(r, now) === "held").sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
+    waitingOnThem: byStage((r) => ["sent", "waiting_on_them"].includes(stageOf(r, now))).sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
     booked: upcoming.sort((a, b) => startOf(a) - startOf(b)).map((r) => item(r, r.booked ? { booked: { start: r.booked.start, end: r.booked.end } } : {})),
     closed: ledger.requests.filter((r) => r.status !== "offered" && r.status !== "booked" && now - Date.parse(closedWhen(r)) <= WEEK)
       .sort((a, b) => closedWhen(b).localeCompare(closedWhen(a))).slice(0, 10).map((r) => item(r, { closedAt: closedWhen(r) })),
@@ -336,6 +385,7 @@ if (isMain(import.meta.url)) {
         chat: { type: "string" },
         id: { type: "string" },
         json: { type: "string" },
+        text: { type: "string" },
         "json-file": { type: "string" },
         hours: { type: "string" },
         "lead-min": { type: "string" },
@@ -373,6 +423,16 @@ if (isMain(import.meta.url)) {
         if (!Number.isFinite(hours) || hours < 0) throw new Error(`--hours must be a number >= 0, got ${values.hours}`);
         return { requests: expiredRequests(readJson<Ledger>(path, EMPTY), hours, now) };
       }
+      case "log": {
+        if (!values.id) throw new Error("usage: ledger.ts log --id X [--text T]");
+        if (values.text === undefined) {
+          const request = readJson<Ledger>(path, EMPTY).requests.find((r) => r.id === values.id);
+          if (!request) throw new Error(`no request ${values.id}`);
+          return { log: request.log ?? [] };
+        }
+        const ledger = updateJson<Ledger>(path, EMPTY, (l) => appendLog(l, values.id!, values.text!, now));
+        return { log: ledger.requests.find((r) => r.id === values.id)!.log };
+      }
       case "pipeline":
         return pipeline(readJson<Ledger>(path, EMPTY), now);
       case "history": {
@@ -389,7 +449,7 @@ if (isMain(import.meta.url)) {
         return { requests: dueReminders(readJson<Ledger>(path, EMPTY), now, lead) };
       }
       default:
-        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | pipeline | history | cleanup | reminders");
+        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | pipeline | history | log | cleanup | reminders");
     }
   });
 }

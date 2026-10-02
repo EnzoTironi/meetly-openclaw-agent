@@ -125,13 +125,34 @@ In the owner's DM:
 
 When the owner asks who they are waiting on, or how their meetings stand,
 run `ledger.ts pipeline` and answer in their language, one short line per
-person: what the meeting is for, and which of these it is: waiting on the
-owner (an out-of-hours time to approve), waiting on the other person (say
-for how many hours), booked (day and time; for a booking with no time
-recorded: say its time is unavailable), or closed in the past week. For
-an offer that has waited a day or more, suggest a next step, such as new
-times; the next step is advice, never a claim about what happened. State only
-what the ledger says.
+person: what the meeting is for, its `stage` and its `nextStep`. Stages:
+`waiting_on_us` (an out-of-hours time for the owner to approve),
+`held` (times held but never delivered to a group: waiting on Meetly, not on
+the person), `sent` (offered less than a day ago), `waiting_on_them` (no
+answer in a day or more, with the hours), `confirmed` (booked: day and time;
+for a booking with no time recorded: say its time is unavailable), and
+`passed` (closed in the past week). The next step is advice computed from the
+stage, never a claim about what happened. State only what the ledger says.
+Someone on the do-not-contact list has no stage: `blocklist.ts list`.
+
+## What the log says
+
+Keep a dated log of what happened: after each of these, run
+`ledger.ts log --id <id> --text '<one line>'`: the offer was sent (after the
+send succeeded), the person picked a time, the booking was recorded, the
+meeting was moved or cancelled, the offer expired. Write only what the
+calendar or the chat confirmed, never a plan or a guess. Read it back with
+`ledger.ts log --id <id>`.
+
+## Do not contact
+
+When the owner says never to contact someone, or to stop: run `blocklist.ts
+block --handle <their phone or email> --name <name>` and confirm in one line.
+To take them off: `blocklist.ts unblock --handle <handle>`. In the poll, skip
+a sender for whom `blocklist.ts check --handle <sender>` says `blocked`: no
+group, no holds, nothing sent. `start-thread.ts` refuses to open a group with
+anyone on the list, so if it prints `do not contact`, tell the owner that and
+stop; never route around it.
 
 ## Before you ask the other person
 

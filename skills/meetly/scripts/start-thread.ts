@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { isMain, run } from "./cli.ts";
+import { isBlocked, loadBlocked } from "./blocklist.ts";
 import { fetchIdentity, findOwnerDm, plowApi, type ApiOptions } from "./owner-chat.ts";
 import { isHandle } from "./reachable-handle.ts";
 
@@ -21,6 +22,11 @@ export async function startThread(opts: ApiOptions & { members: string[]; body: 
   // A phone in E.164 or an iMessage email: reachable-handle.ts says which one.
   for (const m of opts.members) {
     if (!isHandle(m)) throw new Error(`not a phone in E.164 (like +15551234567) or an email: ${m}`);
+  }
+  // The owner's do-not-contact list is the one rule no route around the skill may skip.
+  const blocked = loadBlocked();
+  for (const m of opts.members) {
+    if (isBlocked(blocked, m)) throw new Error(`do not contact: ${m} is on the owner's do-not-contact list; the owner must take them off it first`);
   }
   if (!opts.body.trim()) throw new Error("the body is empty");
   if (!opts.key.trim()) throw new Error("the key is empty");
