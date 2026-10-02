@@ -142,7 +142,10 @@ test("an owner booking with no time named takes the announced first option, thro
     "without naming a time, and more than one offered time is open, book the first offered time through \"Pick\" (update that hold, then delete the other holds)",
     "the first option because no time was named",
     "A time the other person already picked, or the owner names, is the time",
-    "request of theirs that is already open (`origin: owner`), with no time, do not offer again: book the first offered time through \"Pick\"",
+    "request of theirs that is already open (`origin: owner`), with no time, resolve it in",
+    "`ledger.ts find --handle <contact handle>`. Re-read it",
+    "Book its first current offered time through **Owner request pick** below",
+    "Send the booking confirmation to the request's `chatUid`",
     "A request someone else made (`origin: inbound`) is approved only in its meeting thread: point the owner there and book nothing",
   ];
   for (const rule of rules) assert.ok(group.includes(rule), `missing rule: ${rule}`);

@@ -124,10 +124,13 @@ In the owner's DM:
    owner's language: say "book it" and Meetly takes the first option, or name
    another.
 7. When the owner's message only tells you to book or schedule a request of
-   theirs that is already open (`origin: owner`), with no time, do not offer
-   again: book the first offered time through "Pick" and confirm in that
-   group. A request someone else made (`origin: inbound`) is approved only in
-   its meeting thread: point the owner there and book nothing.
+   theirs that is already open (`origin: owner`), with no time, resolve it in
+   the owner's DM with `ledger.ts find --handle <contact handle>`. Re-read it
+   now and require `status: offered` and `origin: owner`; do not look up the
+   owner's DM using `find --chat` or use a request retained in context. Book
+   its first current offered time through **Owner request pick** below. A
+   request someone else made (`origin: inbound`) is approved only in its
+   meeting thread: point the owner there and book nothing.
 
 ## Meeting format
 
@@ -283,6 +286,16 @@ offer.
   4. The group confirmation also notifies the owner. Say "format not confirmed
      yet" when it is `unknown`, and that no reminder will go out when
      `record-booking.ts` warned `no-meet-link`.
+- **Owner request pick** (the owner accepts their own request in their DM):
+  1. Use the request just resolved by handle in step 7. Require
+     `origin: owner`, `status: offered`, and a current non-empty `offered[]`;
+     choose its first offered hold. Do not run `find --chat` with the owner's
+     DM or resolve a sender handle from that DM.
+  2. Follow **Pick** steps 1 and 2 for updating the selected hold and deleting
+     the other holds. Its fresh handle lookup is already satisfied by step 7.
+  3. Send the booking confirmation to the request's `chatUid` using the normal
+     meeting-thread send path. If it has no `chatUid`, stop before booking and
+     tell the owner the offer has no linked meeting thread.
 - **Another day or time:** delete the current holds. Run `slots.ts` narrowed
   to what they said (plus the owner's original constraints for
   `origin: owner`), hold again, offer again, and update `offered`.
