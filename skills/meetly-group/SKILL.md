@@ -20,6 +20,11 @@ owner's DM because no meeting thread exists yet. From the owner's main DM, a
 follow-up to a known meeting thread uses `plow_reply_to`.
 An unattended poll has no current conversation and uses `message` with the
 known meeting chat uid as its target.
+Before every contact-visible message (including an existing-group offer,
+booking confirmation, cancellation, or approval follow-up), run
+`blocklist.ts check --handle <request.handle>` immediately before sending. If
+blocked, do not send; tell the owner privately and leave the request and
+calendar state unchanged.
 
 ## Read the calendar
 
@@ -198,13 +203,15 @@ calendar or the chat confirmed, never a plan or a guess. Read it back with
 
 ## Do not contact
 
-When the owner says never to contact someone, or to stop: run `blocklist.ts
-block --handle <their phone or email> --name <name>` and confirm in one line.
-To take them off: `blocklist.ts unblock --handle <handle>`. In the poll, skip
-a sender for whom `blocklist.ts check --handle <sender>` says `blocked`: no
-group, no holds, nothing sent. `start-thread.ts` refuses to open a group with
-anyone on the list, so if it prints `do not contact`, tell the owner that and
-stop; never route around it.
+When the owner says never to contact someone, or to stop, resolve their
+Contacts card and block every phone and email alias with repeated
+`--handle` options: `blocklist.ts block --handle <phone> --handle <email>
+--name <name>`. Confirm in one line. To take them off, resolve the same card
+and pass every alias to `blocklist.ts unblock`. In the poll, skip a sender for
+whom `blocklist.ts check --handle <sender>` says `blocked`: no group, no
+holds, nothing sent. `start-thread.ts` checks the list again immediately
+before its POST, so a new block also stops a group-open race. Never route
+around a `do not contact` result.
 
 ## Research before proposing
 

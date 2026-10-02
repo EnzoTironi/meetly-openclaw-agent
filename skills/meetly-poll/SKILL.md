@@ -16,6 +16,10 @@ This unattended turn has no current conversation. Send meeting notifications
 with `message` (action `send`, channel `plow`, accountId `chat`, target the
 meeting's `chatUid`); the owner is in that thread. For an operational warning
 with no meeting thread, use `owner-chat.ts` and target the printed `chatUid`.
+Before each contact-visible poll message, immediately check
+`blocklist.ts check --handle <request.handle>`. If blocked, skip it and do
+not update the reminder or nudge timestamp; private owner notifications may
+still explain why no contact message was sent.
 
 1. Run `setup-status.ts`. If it is not `READY`, or `config.paused` is true, end.
    (Pausing disables this job, so a paused Meetly sends no reminders either.)
@@ -89,8 +93,8 @@ with no meeting thread, use `owner-chat.ts` and target the printed `chatUid`.
      other person too long. For each `waitingOnThem` item, read the latest
      messages in that meeting thread first. If the person has already
      answered, do not nudge; handle their reply in the group. Otherwise send
-     one brief, friendly follow-up in their language, asking whether any held
-     time works or whether Meetly should find other times. Do not imply that
+      one brief, friendly follow-up in their language, asking whether any held
+      time works or whether Meetly should find other times. Do not imply that
      they forgot or that a time was booked. Then run `ledger.ts update --id
      <id> --json '{"personNudgedAt":"<now ISO>"}'` so this offer is nudged
      once. A replacement offer makes the next follow-up eligible after 24

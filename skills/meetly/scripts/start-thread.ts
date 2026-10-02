@@ -23,10 +23,11 @@ export async function startThread(opts: ApiOptions & { members: string[]; body: 
   for (const m of opts.members) {
     if (!isHandle(m)) throw new Error(`not a phone in E.164 (like +15551234567) or an email: ${m}`);
   }
-  // The owner's do-not-contact list is the one rule no route around the skill may skip.
-  const blocked = loadBlocked();
-  for (const m of opts.members) {
-    if (isBlocked(blocked, m)) throw new Error(`do not contact: ${m} is on the owner's do-not-contact list; the owner must take them off it first`);
+  // Fast check before remote identity reads; the authoritative check runs again
+  // immediately before the POST to close the blocklist-update race.
+  const blockedInitially = loadBlocked();
+  for (const m of opts.members) if (isBlocked(blockedInitially, m)) {
+    throw new Error(`do not contact: ${m} is on the owner's do-not-contact list; the owner must take them off it first`);
   }
   if (!opts.body.trim()) throw new Error("the body is empty");
   if (!opts.key.trim()) throw new Error("the key is empty");
@@ -39,6 +40,10 @@ export async function startThread(opts: ApiOptions & { members: string[]; body: 
   const owner = dm.participants?.find((p) => p.type === "member" && p.role === "owner");
   if (!owner?.provider_key) throw new Error("the owner's chat has no owner handle");
   const members = [...new Set([owner.provider_key, ...opts.members])].sort();
+  const blockedBeforePost = loadBlocked();
+  for (const m of opts.members) if (isBlocked(blockedBeforePost, m)) {
+    throw new Error(`do not contact: ${m} is on the owner's do-not-contact list; the owner must take them off it first`);
+  }
   const idempotencyKey = createHash("sha256").update(JSON.stringify([lineUid, opts.key, members, opts.body])).digest("hex");
 
   let res: Response;

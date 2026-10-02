@@ -11,14 +11,22 @@ export type Blocked = { handle: string; name?: string; at: string };
 
 export const isBlocked = (list: Blocked[], handle: string): boolean => list.some((b) => sameHandle(b.handle, handle));
 
-export function block(list: Blocked[], handle: string, name: string | undefined, now: number): Blocked[] {
-  const h = normalizeHandle(handle ?? "");
-  if (!h || h === "+") throw new Error("a handle is required: a phone in E.164 or an email");
-  if (isBlocked(list, h)) return list;
-  return [...list, { handle: h, ...(name ? { name } : {}), at: new Date(now).toISOString() }];
+export function block(list: Blocked[], handles: string[], name: string | undefined, now: number): Blocked[] {
+  if (handles.length === 0) throw new Error("give every phone and email for this contact (--handle H for each)");
+  const at = new Date(now).toISOString();
+  let result = list;
+  for (const raw of handles) {
+    const handle = normalizeHandle(raw ?? "");
+    if (!handle || handle === "+") throw new Error("a handle is required: a phone or an email");
+    if (!isBlocked(result, handle)) result = [...result, { handle, ...(name ? { name } : {}), at }];
+  }
+  return result;
 }
 
-export const unblock = (list: Blocked[], handle: string): Blocked[] => list.filter((b) => !sameHandle(b.handle, handle));
+export const unblock = (list: Blocked[], handles: string[]): Blocked[] => {
+  if (handles.length === 0) throw new Error("give every blocked phone and email (--handle H for each)");
+  return list.filter((b) => !handles.some((handle) => sameHandle(b.handle, handle)));
+};
 
 export function loadBlocked(): Blocked[] {
   return readJson<Blocked[]>(file("blocked.json"), []);
@@ -27,18 +35,18 @@ export function loadBlocked(): Blocked[] {
 if (isMain(import.meta.url)) {
   run(() => {
     const [cmd, ...rest] = process.argv.slice(2);
-    const { values } = parseArgs({ args: rest, options: { handle: { type: "string" }, name: { type: "string" } } });
+    const { values } = parseArgs({ args: rest, options: { handle: { type: "string", multiple: true }, name: { type: "string" } } });
     const path = file("blocked.json");
     switch (cmd) {
       case "block":
-        if (values.handle === undefined) throw new Error("usage: blocklist.ts block --handle H [--name N]");
+        if (!values.handle?.length) throw new Error("usage: blocklist.ts block --handle H [--handle H ...] [--name N]");
         return { blocked: updateJson<Blocked[]>(path, [], (l) => block(l, values.handle!, values.name, Date.now())) };
       case "unblock":
-        if (values.handle === undefined) throw new Error("usage: blocklist.ts unblock --handle H");
+        if (!values.handle?.length) throw new Error("usage: blocklist.ts unblock --handle H [--handle H ...]");
         return { blocked: updateJson<Blocked[]>(path, [], (l) => unblock(l, values.handle!)) };
       case "check":
-        if (values.handle === undefined) throw new Error("usage: blocklist.ts check --handle H");
-        return { blocked: isBlocked(loadBlocked(), values.handle) };
+        if (!values.handle?.length) throw new Error("usage: blocklist.ts check --handle H [--handle H ...]");
+        return { blocked: values.handle.some((handle) => isBlocked(loadBlocked(), handle)) };
       case "list":
         return { blocked: loadBlocked() };
       default:

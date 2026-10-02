@@ -290,3 +290,13 @@ test("the optional owner gate holds inbound times until an owner DM approval", (
   assert.ok(setup.includes("record-setup.ts --field ownerGate --value on"));
   assert.ok(poll.includes("Never contact the other person before approval"));
 });
+
+test("do not contact is checked before every contact-visible message and stored for all aliases", () => {
+  const group = flat(readFileSync(join(SKILLS, "meetly-group", "SKILL.md"), "utf8"));
+  const poll = flat(readFileSync(join(SKILLS, "meetly-poll", "SKILL.md"), "utf8"));
+  assert.ok(group.includes("Before every contact-visible message"));
+  assert.ok(group.includes("blocklist.ts check --handle <request.handle>"));
+  assert.ok(group.includes("blocklist.ts block --handle <phone> --handle <email>"));
+  assert.ok(poll.includes("Before each contact-visible poll message, immediately check `blocklist.ts check --handle <request.handle>`"));
+  assert.ok(poll.includes("do not update the reminder or nudge timestamp"));
+});
