@@ -84,11 +84,13 @@ to install anything else.
 - "Leave an hour for travel around in-person meetings" →
   `record-setup.ts --field travel --value <minutes>`; accept minutes or hours
   from 1 minute to 3 hours. `none` clears the buffer. The default is no buffer.
-- "Ask me before replying to new meeting requests" →
-  `record-setup.ts --field ownerGate --value on`; "you can answer meeting
-  requests without asking me first" → `off`. The default is off. When on,
-  inbound requests are held on the calendar and the owner must approve the
-  proposed times in their DM before Meetly contacts the person.
+- For every inbound meeting request, Meetly holds proposed times on the
+  calendar and asks you in your DM before contacting the person. This is on by
+  default, including for existing configurations without an `ownerGate`
+  setting. If you explicitly say "you can answer meeting requests without
+  asking me first", record `record-setup.ts --field ownerGate --value off`;
+  that is standing authorization for Meetly to contact people automatically.
+  "Ask me before replying to new meeting requests" records it as on again.
 - "Pause Meetly" → `register-crons.ts --pause`. "Resume" → `register-crons.ts --resume`.
 - "Status" → summarize `setup-status.ts`: days, window, duration, horizon,
   travel buffer when set, video provider (Google Meet, or Zoom when

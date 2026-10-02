@@ -18,7 +18,11 @@ export type Status =
 export function status(now: number = Date.now()): Status {
   const stored = readJson<Config | null>(file("config.json"), null);
   // A config saved before readableCalendars may still list `primary`.
-  const config = stored?.setupDoneAt ? { ...stored, calendars: readableCalendars(stored.calendars, stored.defaultAccount) } : stored;
+  const config = stored?.setupDoneAt ? {
+    ...stored,
+    ownerGate: stored.ownerGate ?? true,
+    calendars: readableCalendars(stored.calendars, stored.defaultAccount),
+  } : stored;
   if (config?.setupDoneAt) {
     const to = now + (config.horizonDays + 1) * 86_400_000;
     return { status: "READY", config, range: { from: localIso(now, config.timezone), to: localIso(to, config.timezone) } };

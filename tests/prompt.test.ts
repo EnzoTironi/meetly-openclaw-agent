@@ -280,14 +280,15 @@ test("Meetly re-proposes fresh times when the other person says none of the opti
   assert.ok(group.includes("never claim a slot is free from an earlier calendar read"));
 });
 
-test("the optional owner gate holds inbound times until an owner DM approval", () => {
+test("inbound offers require owner DM approval by default", () => {
   const group = flat(readFileSync(join(SKILLS, "meetly-group", "SKILL.md"), "utf8"));
   const setup = flat(readFileSync(join(SKILLS, "meetly-setup", "SKILL.md"), "utf8"));
   const poll = flat(readFileSync(join(SKILLS, "meetly-poll", "SKILL.md"), "utf8"));
   assert.ok(group.includes("ledger.ts approvals"));
   assert.ok(group.includes("Do not open a group or send any proposed time"));
   assert.ok(group.includes("owner-gate:<id>"));
-  assert.ok(setup.includes("record-setup.ts --field ownerGate --value on"));
+  assert.ok(setup.includes("This is on by default"));
+  assert.ok(setup.includes("that is standing authorization"));
   assert.ok(poll.includes("Never contact the other person before approval"));
 });
 
