@@ -232,7 +232,9 @@ test("an owner who cancels or moves a booked meeting has Meetly tell the other p
   const group = flat(readFileSync(join(SKILLS, "meetly-group", "SKILL.md"), "utf8"));
   assert.ok(group.includes("## Owner cancels or moves"));
   assert.ok(group.includes("run `ledger.ts find --event <event id> --account <its account>`"));
-  assert.ok(group.includes("the one place Meetly reads event titles"));
+  assert.ok(group.includes("`owner-events.ts --from <ISO> --to <ISO>`"));
+  assert.ok(group.includes("only the title, id, account and times"));
+  assert.ok(!group.includes("with `plow-gog calendar events`"));
   const readme = flat(readFileSync(join(ROOT, "README.md"), "utf8"));
   assert.ok(!readme.includes("Rescheduling or cancelling a meeting that is already booked is left to you"));
   assert.ok(group.includes("'{\"status\":\"cancelled\",\"pendingOwner\":null}'"));

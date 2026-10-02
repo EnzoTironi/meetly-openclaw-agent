@@ -21,8 +21,8 @@ their chat uid from `owner-chat.ts`.
 Run `busy.ts --fetch`. It reads every calendar in the config on the Mac
 itself and writes `/var/lib/plow/meetly/tmp/busy.json`; it prints only
 `{file, busy, degraded, unknownAfter?}`. Never run `plow-gog calendar events`
-yourself or copy a calendar listing into a file; the one exception is "Owner
-cancels or moves". An account in `degraded`
+yourself or copy a calendar listing into a file; "Owner cancels or moves" uses
+`owner-events.ts` for the same reason. An account in `degraded`
 could not be read: `slots.ts` reports it, and you never claim the owner is
 free there.
 
@@ -124,13 +124,15 @@ In the owner's DM:
 In the owner's DM, when the owner cancels, moves or clears time ("cancel my
 lunch with Ana", "remove all my appointments today", "move the call to 3pm"):
 
-1. Read the affected events with `plow-gog calendar events` for the owner's
-   range, so each comes with its title, id and account. This is the one place
-   Meetly reads event titles, and only in the owner's own DM, to match their
-   words; nothing from it goes to anyone else. For each event, run `ledger.ts
-   find --event <event id> --account <its account>`. An event with no request
-   (or one whose request is not `booked`) is not a Meetly meeting: handle it
-   as the owner asked and tell no one.
+1. Run `owner-events.ts --from <ISO> --to <ISO>` for the owner's range. It
+   prints `{events: [{id, account, title, start, end}], degraded}`: only the
+   title, id, account and times, read on the Mac, so match the owner's words
+   against the titles. Never run `plow-gog calendar events` yourself for
+   this. For each event, run `ledger.ts find --event <event id> --account <its
+   account>`. An event with no request (or one whose request is not `booked`)
+   is not a Meetly meeting: handle it as the owner asked and tell no one. An
+   account in `degraded` could not be read: say so, and never claim there was
+   nothing to cancel there.
 2. Act on the owner's words. Their own instruction that covers the meeting
    ("all", "everything today", the person's name) is the approval: do not ask
    again. Ask once only when the words truly leave it open which meetings

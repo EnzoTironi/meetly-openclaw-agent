@@ -15,9 +15,10 @@ export type Busy = { start: string; end: string; id?: string; account?: string }
 export type BusyResult = { busy: Busy[]; unknownAfter?: string; degraded: string[] };
 
 type Stamp = string | { dateTime?: string; date?: string } | undefined;
-type CalEvent = {
+export type CalEvent = {
   id?: string;
   account?: string;
+  summary?: string;
   startLocal?: string;
   endLocal?: string;
   start?: Stamp;
@@ -42,7 +43,7 @@ export function instant(value: string, tz: string): number {
   return ms;
 }
 
-function stamp(local: string | undefined, raw: Stamp): string | undefined {
+export function stamp(local: string | undefined, raw: Stamp): string | undefined {
   if (local) return local;
   if (typeof raw === "string") return raw;
   return raw?.dateTime ?? raw?.date;
@@ -117,34 +118,40 @@ const FETCH_MAX = 100;
 // Reads every configured account on the Mac directly (mac.ts), one
 // `plow-gog calendar events` per account, so the listing never passes through
 // the model. An account the Mac cannot read, or whose listing does not parse,
-// is degraded.
-export async function fetchBusy(
-  config: Pick<Config, "timezone" | "calendars">,
+// is degraded. Every event is tagged with the account it was read from.
+export async function listEvents(
+  config: Pick<Config, "calendars">,
   range: { from: string; to: string },
   opts: BridgeOptions = {},
-): Promise<BusyResult> {
+): Promise<{ events: CalEvent[]; degraded: string[] }> {
   const byAccount = new Map<string, string[]>();
   for (const c of config.calendars) byAccount.set(c.account, [...(byAccount.get(c.account) ?? []), c.id]);
-  const results: unknown[] = [];
+  const events: CalEvent[] = [];
   const degraded: string[] = [];
   for (const [account, ids] of byAccount) {
     const output = await runOnMac({
       argv: ["plow-gog", "calendar", "events", "--calendars", ids.join(","), "--account", account,
         "--from", range.from, "--to", range.to, "--max", String(FETCH_MAX), "--json"],
       readPaths: [], timeoutMs: 60_000,
-      goal: "Meetly: read your busy times so it only offers times you are free",
+      goal: "Meetly: read your calendar so it only offers times you are free, and finds the meetings to change",
     }, opts).catch(() => undefined);
-    let events: CalEvent[];
     try {
       if (output === undefined) throw new Error("unreadable");
-      events = eventsOf(listingOf(output)).events;
+      events.push(...eventsOf(listingOf(output)).events.map((e) => ({ ...e, account })));
     } catch {
       degraded.push(account);
-      continue;
     }
-    results.push({ events: events.map((e) => ({ ...e, account })) });
   }
-  const out = toBusy(results, { tz: config.timezone, max: FETCH_MAX });
+  return { events, degraded };
+}
+
+export async function fetchBusy(
+  config: Pick<Config, "timezone" | "calendars">,
+  range: { from: string; to: string },
+  opts: BridgeOptions = {},
+): Promise<BusyResult> {
+  const { events, degraded } = await listEvents(config, range, opts);
+  const out = toBusy([{ events }], { tz: config.timezone, max: FETCH_MAX });
   out.degraded.push(...degraded);
   return out;
 }
