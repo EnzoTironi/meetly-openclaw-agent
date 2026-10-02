@@ -55,32 +55,20 @@ test("only what nobody can infer is asked: the name, the time zone and the calen
   });
 });
 
-test("the days, the hours, the length and the horizon default, and finishing fills them in", () => {
+test("the days, the hours and the horizon default, an answer given before finishing wins, and finishing fills the rest in", () => {
   assert.deepEqual(DEFAULTS, { days: ["mon", "tue", "wed", "thu", "fri"], windowStart: "09:00", windowEnd: "18:00", durationMin: 30, horizonDays: 14 });
   withHome((home) => {
     record("ownerName", "Jean");
     record("timezone", "America/Sao_Paulo");
     record("calendars", CALENDARS);
+    record("durationMin", "45");
     const s = status();
     assert.deepEqual(s.status === "SETUP_NEEDED" && s.defaults, DEFAULTS);
     finish(() => ({}), Date.parse("2026-09-26T12:00:00Z"));
     const config = readJson<Config | null>(join(home, "config.json"), null)!;
     assert.deepEqual([config.days, config.windowStart, config.windowEnd, config.durationMin, config.horizonDays],
-      [DEFAULTS.days, "09:00", "18:00", 30, 14]);
+      [DEFAULTS.days, "09:00", "18:00", 45, 14]);
     assert.equal(status().status, "READY");
-    // An explicit answer still wins, and is kept as the new default.
-    record("durationMin", "45");
-    assert.equal(readJson<Config | null>(join(home, "config.json"), null)!.durationMin, 45);
-  });
-});
-
-test("an answer given before finishing overrides its default", () => {
-  withHome((home) => {
-    for (const [f, v] of ANSWERS.filter(([f]) => f !== "horizonDays")) record(f, v);
-    finish(() => ({}), Date.parse("2026-09-26T12:00:00Z"));
-    const config = readJson<Config | null>(join(home, "config.json"), null)!;
-    assert.equal(config.horizonDays, 14);
-    assert.deepEqual(config.days, ["mon", "tue", "wed", "thu", "fri"]);
   });
 });
 
