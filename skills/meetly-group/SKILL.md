@@ -163,15 +163,25 @@ group, no holds, nothing sent. `start-thread.ts` refuses to open a group with
 anyone on the list, so if it prints `do not contact`, tell the owner that and
 stop; never route around it.
 
-## Before you ask the other person
+## Research before proposing
 
-Look first: the contact card (`contacts`, `contact.ts`), the thread, and the
-person's history: run `ledger.ts history --handle <their handle>`, which lists
-earlier requests with that person: what the meeting was for, how it was to
-happen, where and for how long. Use what you find, and keep a request's topic and format as it
-was. Never ask the other person for something you can find, or that the
-context already answers ("in person or on video?" when the owner said video).
-What is the owner's to say (the goal, the place) is asked of the owner.
+Before proposing times, establish the topic, purpose, attendees, location,
+duration and meeting format from the current conversation and the owner's
+request. Then check the contact card (`contacts`, `contact.ts`), this person's
+recent Plow message thread, and `ledger.ts history --handle <their handle>`.
+For an owner request, also search the owner's relevant email and Plow messages
+for the contact and topic, following the Mac's `google-workspace` and
+`plow-messages` skills for their exact commands. Keep searches narrow to this
+person and scheduling context; use only details that the sources confirm.
+
+Carry forward a prior request's topic, format, location and duration when the
+current request is a continuation. Prefer explicit current instructions over
+older context. Never ask the other person for something these sources answer,
+or that the context already answers ("in person or on video?" when the owner
+said video). If a required detail remains unclear, ask the owner privately
+before contacting the other person. The owner's goal and intended location
+must come from the owner or confirmed history; never infer them from a name or
+calendar event title.
 
 ## Meeting format
 
