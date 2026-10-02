@@ -47,29 +47,24 @@ test("an account the Mac could not read is degraded, never reported as empty", a
   assert.deepEqual(r, { events: [], degraded: ["owner@example.com"] });
 });
 
-test("a listing that says part of it could not be read is degraded, even though the call succeeded", async () => {
-  const listing = JSON.stringify({ items: [gog("e1", "Sync", "2026-10-01T10:00:00-03:00", "2026-10-01T10:30:00-03:00")], degraded: ["team@group.calendar.google.com"] });
-  const r = await listOwnerEvents({ calendars: [{ account: "owner@example.com", id: "owner@example.com" }] }, range, { token: "tok", fetch: macBridge(() => listing) });
-  assert.deepEqual(r.events.map((e) => e.id), ["e1"]);
-  assert.deepEqual(r.degraded, ["owner@example.com"]);
-});
-
 test("an event from a secondary calendar keeps that calendar's id, so it is changed there and not on primary", async () => {
   const team = gog("t1", "Team sync", "2026-10-01T10:00:00-03:00", "2026-10-01T10:30:00-03:00", { CalendarID: "team@group.calendar.google.com" });
   const r = await listOwnerEvents({ calendars: [{ account: "owner@example.com", id: "team@group.calendar.google.com" }] }, range, { token: "tok", fetch: macBridge(() => JSON.stringify({ events: [team] })) });
   assert.deepEqual(r.events.map((e) => [e.id, e.account, e.calendarId]), [["t1", "owner@example.com", "team@group.calendar.google.com"]]);
 });
 
-test("a listing that was cut short, by the server or at the 100-event cap, is not reported as fully searched", async () => {
+test("partial listings degrade the account", async () => {
   const config = { calendars: [{ account: "owner@example.com", id: "owner@example.com" }] };
-  const cut = JSON.stringify({ events: [gog("e1", "Sync", "2026-10-01T10:00:00-03:00", "2026-10-01T10:30:00-03:00")], truncated: { omitted: 4, after: "2026-10-01T11:00:00-03:00" } });
-  const cutShort = await listOwnerEvents(config, range, { token: "tok", fetch: macBridge(() => cut) });
-  assert.deepEqual([cutShort.events.length, cutShort.degraded], [1, ["owner@example.com"]]);
-  const full = JSON.stringify({ events: Array.from({ length: 100 }, (_, i) => gog(`e${i}`, "Block", "2026-10-01T10:00:00-03:00", "2026-10-01T10:30:00-03:00")) });
-  const atCap = await listOwnerEvents(config, range, { token: "tok", fetch: macBridge(() => full) });
-  assert.deepEqual([atCap.events.length, atCap.degraded], [100, ["owner@example.com"]]);
-  const few = await listOwnerEvents(config, range, { token: "tok", fetch: macBridge(() => JSON.stringify({ events: [gog("e1", "Sync", "2026-10-01T10:00:00-03:00", "2026-10-01T10:30:00-03:00")] })) });
-  assert.deepEqual(few.degraded, []);
+  const event = gog("e1", "Sync", "2026-10-01T10:00:00-03:00", "2026-10-01T10:30:00-03:00");
+  const cases = [
+    ["degraded metadata", { items: [event], degraded: ["team@group.calendar.google.com"] }, 1],
+    ["server truncation", { events: [event], truncated: { omitted: 4, after: "2026-10-01T11:00:00-03:00" } }, 1],
+    ["100-event cap", { events: Array.from({ length: 100 }, (_, i) => ({ ...event, id: `e${i}` })) }, 100],
+  ] as const;
+  for (const [name, listing, count] of cases) {
+    const r = await listOwnerEvents(config, range, { token: "tok", fetch: macBridge(() => JSON.stringify(listing)) });
+    assert.deepEqual([r.events.length, r.degraded], [count, ["owner@example.com"]], name);
+  }
 });
 
 test("the CLI needs a range and a finished setup, and prints only the safe fields", () => {

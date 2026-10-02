@@ -117,6 +117,16 @@ test("fetchBusy reports an account it could not read as degraded, never as free"
   assert.deepEqual(noMac.degraded, ["owner@example.com"]);
 });
 
+test("fetchBusy preserves the earliest server truncation as unknownAfter", async () => {
+  const r = await fetchBusy({
+    timezone: TZ,
+    calendars: [{ account: "owner@example.com", id: "owner@example.com" }, { account: "work@example.com", id: "work@example.com" }],
+  }, range, { token: "tok", fetch: macBridge((argv) => argv.includes("work@example.com")
+    ? JSON.stringify({ events: [], truncated: { after: "2026-10-02T12:00:00-03:00" } })
+    : JSON.stringify({ events: [], truncated: { after: "2026-10-01T12:00:00-03:00" } })) });
+  assert.deepEqual(r, { busy: [], degraded: [], unknownAfter: "2026-10-01T15:00:00.000Z" });
+});
+
 test("the CLI's --fetch writes tmp/busy.json for slots.ts and prints only a short summary", () => {
   const home = tmpHome();
   writeJson(join(home, "config.json"), {

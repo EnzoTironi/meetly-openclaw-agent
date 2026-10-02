@@ -124,13 +124,14 @@ export async function listEvents(
   config: Pick<Config, "calendars">,
   range: { from: string; to: string },
   opts: BridgeOptions = {},
-): Promise<{ events: CalEvent[]; degraded: string[]; incomplete: string[] }> {
+): Promise<{ events: CalEvent[]; degraded: string[]; incomplete: string[]; truncatedAfter: string[] }> {
   const byAccount = new Map<string, string[]>();
   for (const c of config.calendars) byAccount.set(c.account, [...(byAccount.get(c.account) ?? []), c.id]);
   const events: CalEvent[] = [];
   const degraded: string[] = [];
   // Accounts whose listing was cut short: read, but not all of it.
   const incomplete: string[] = [];
+  const truncatedAfter: string[] = [];
   for (const [account, ids] of byAccount) {
     const output = await runOnMac({
       argv: ["plow-gog", "calendar", "events", "--calendars", ids.join(","), "--account", account,
@@ -142,6 +143,7 @@ export async function listEvents(
       if (output === undefined) throw new Error("unreadable");
       const listing = eventsOf(listingOf(output));
       events.push(...listing.events.map((e) => ({ ...e, account })));
+      if (listing.after) truncatedAfter.push(listing.after);
       // Part of the listing could not be read: the account is not fully searched.
       if (listing.degraded.length > 0) degraded.push(account);
       else if (listing.after || listing.events.length >= FETCH_MAX) incomplete.push(account);
@@ -149,7 +151,7 @@ export async function listEvents(
       degraded.push(account);
     }
   }
-  return { events, degraded, incomplete };
+  return { events, degraded, incomplete, truncatedAfter };
 }
 
 export async function fetchBusy(
@@ -157,8 +159,8 @@ export async function fetchBusy(
   range: { from: string; to: string },
   opts: BridgeOptions = {},
 ): Promise<BusyResult> {
-  const { events, degraded } = await listEvents(config, range, opts);
-  const out = toBusy([{ events }], { tz: config.timezone, max: FETCH_MAX });
+  const { events, degraded, truncatedAfter } = await listEvents(config, range, opts);
+  const out = toBusy([{ events }, ...truncatedAfter.map((after) => ({ events: [], truncated: { after } }))], { tz: config.timezone, max: FETCH_MAX });
   out.degraded.push(...degraded);
   return out;
 }
