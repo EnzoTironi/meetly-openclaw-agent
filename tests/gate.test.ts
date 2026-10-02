@@ -88,7 +88,7 @@ test("preboot enables the gate with conversation access and replaces the volume'
 const LATCH = { connected: false, download: "https://plow.co/download/latch", about: "https://plow.co/latch" };
 
 test("with no Mac at the calendars question the gate explains Plow Latch with its link instead of asking", () => {
-  const context = gateContext(status({ status: "SETUP_NEEDED", next: "calendars", question: "Which of your calendars should count as busy?", draft: { ownerName: "Ana" }, mac: LATCH }))!;
+  const context = gateContext(status({ status: "SETUP_NEEDED", next: "calendars", question: "Which of your calendars should count as busy?", draft: { ownerName: "Ana" }, defaults: DEFAULTS, mac: LATCH }))!;
   assert.match(context, /Plow Latch/);
   assert.match(context, /https:\/\/plow\.co\/download\/latch/);
   assert.match(context, /https:\/\/plow\.co\/latch/);
@@ -97,9 +97,9 @@ test("with no Mac at the calendars question the gate explains Plow Latch with it
 });
 
 test("with no Mac at the time zone question the gate still asks it, and adds the Latch link", () => {
-  const context = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: { ownerName: "Ana" }, mac: LATCH }))!;
+  const context = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: { ownerName: "Ana" }, defaults: DEFAULTS, mac: LATCH }))!;
   assert.match(context, /and end the turn: What time zone are you in\?/);
   assert.match(context, /https:\/\/plow\.co\/download\/latch/);
-  const connected = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: {}, mac: { connected: true } }))!;
+  const connected = gateContext(status({ status: "SETUP_NEEDED", next: "timezone", question: "What time zone are you in?", draft: {}, defaults: DEFAULTS, mac: { connected: true } }))!;
   assert.doesNotMatch(connected, /plow\.co/);
 });

@@ -226,7 +226,7 @@ test("when the Mac cannot be reached the owner gets the Plow Latch download link
   assert.ok(setup.includes("`mac.connected` is false"));
 });
 
-test("setup asks only what nobody can infer; the rest starts at defaults and is asked late, once", () => {
+test("setup asks only what nobody can infer, and the rest starts at defaults", () => {
   const setup = flat(readFileSync(join(SKILLS, "meetly-setup", "SKILL.md"), "utf8"));
   assert.ok(setup.includes("Setup asks only what nobody else can answer"));
   assert.ok(setup.includes("Never ask the days, hours, meeting length or horizon during setup"));
@@ -234,9 +234,12 @@ test("setup asks only what nobody can infer; the rest starts at defaults and is 
   assert.ok(setup.includes("When `next` is `calendars` and the Mac is connected, do not ask"));
   assert.ok(setup.includes("Record every calendar with `selected: true`"));
   assert.ok(setup.includes("carry out what the owner asked in this same turn"));
-  assert.ok(setup.includes("## Asking late, once"));
-  assert.ok(setup.includes("a standing preference"));
+  // Every setting has a default, so nothing a request needs is asked: the owner's request is never held up.
+  assert.ok(!setup.includes("## Asking late"));
+  assert.ok(!setup.includes("ask that one thing"));
   assert.ok(!setup.includes("Never skip a question, invent an answer or fill one in from a guess"));
   assert.ok(!setup.includes("a few questions set you up"));
-  assert.ok(flat(readFileSync(join(ROOT, "README.md"), "utf8")).includes("starts at these defaults"));
+  const readme = flat(readFileSync(join(ROOT, "README.md"), "utf8"));
+  assert.ok(readme.includes("starts at these defaults"));
+  assert.ok(!readme.includes("asks that one thing"));
 });

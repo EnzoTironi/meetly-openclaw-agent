@@ -1,7 +1,7 @@
 // Is Meetly set up? READY with the config and the calendar range to read,
 // or SETUP_NEEDED with the next question.
 import { isMain, run } from "./cli.ts";
-import { DEFAULTS, nextField, QUESTIONS, readableCalendars, type Config, type Field } from "./config.ts";
+import { DEFAULTS, nextField, QUESTIONS, readableCalendars, type Config, type RequiredField } from "./config.ts";
 import { ownerDisplayName } from "./owner-chat.ts";
 import { macTimezone } from "./mac-timezone.ts";
 import { LATCH_ABOUT_URL, LATCH_DOWNLOAD_URL, macConnected } from "./mac.ts";
@@ -13,7 +13,7 @@ import { localIso } from "./time.ts";
 export type MacStatus = { connected: true } | { connected: false; download: string; about: string };
 export type Status =
   | { status: "READY"; config: Config; range: { from: string; to: string } }
-  | { status: "SETUP_NEEDED"; next: Field | null; question: string | null; draft: Partial<Config>; defaults: typeof DEFAULTS; mac?: MacStatus };
+  | { status: "SETUP_NEEDED"; next: RequiredField | null; question: string | null; draft: Partial<Config>; defaults: typeof DEFAULTS; mac?: MacStatus };
 
 export function status(now: number = Date.now()): Status {
   const stored = readJson<Config | null>(file("config.json"), null);
@@ -42,7 +42,7 @@ export type Lookups = {
   mac?: () => Promise<boolean>;
 };
 
-const NEEDS_MAC: readonly (Field | null)[] = ["timezone", "calendars"];
+const NEEDS_MAC: readonly (RequiredField | null)[] = ["timezone", "calendars"];
 
 export async function statusFilling(lookups: Lookups = { ownerName: ownerDisplayName, timezone: macTimezone, mac: macConnected }, now: number = Date.now()): Promise<Status> {
   const current = await filled(lookups, now);
@@ -51,25 +51,20 @@ export async function statusFilling(lookups: Lookups = { ownerName: ownerDisplay
   return { ...current, mac: connected ? { connected: true } : { connected: false, download: LATCH_DOWNLOAD_URL, about: LATCH_ABOUT_URL } };
 }
 
+// The name and the zone are looked up independently: a name Plow cannot give
+// must not stop the Mac from giving the zone.
 async function filled(lookups: Lookups, now: number): Promise<Status> {
-  for (;;) {
+  for (const field of ["ownerName", "timezone"] as const) {
     const current = status(now);
-    if (current.status !== "SETUP_NEEDED" || !current.next) return current;
-    const lookup = current.next === "ownerName" || current.next === "timezone" ? lookups[current.next] : undefined;
-    if (!lookup) return current;
-    let value: string | undefined;
+    if (current.status !== "SETUP_NEEDED" || current.draft[field] !== undefined || !lookups[field]) continue;
     try {
-      value = (await lookup())?.trim().slice(0, 60);
+      const value = (await lookups[field]!())?.trim().slice(0, 60);
+      if (value) record(field, value);
     } catch {
-      return current;
-    }
-    if (!value) return current;
-    try {
-      record(current.next, value);
-    } catch {
-      return current;
+      // Left to the owner.
     }
   }
+  return status(now);
 }
 
 if (isMain(import.meta.url)) run(() => statusFilling());

@@ -29,6 +29,7 @@ export type Field = (typeof FIELDS)[number];
 // Plow or the Mac can answer them. The other settings start at DEFAULTS and
 // change only when the owner says so.
 export const REQUIRED_FIELDS = ["ownerName", "timezone", "calendars"] as const;
+export type RequiredField = (typeof REQUIRED_FIELDS)[number];
 
 export const DEFAULTS = {
   days: ["mon", "tue", "wed", "thu", "fri"] as Day[],
@@ -38,13 +39,9 @@ export const DEFAULTS = {
   horizonDays: 14,
 };
 
-export const QUESTIONS: Record<Field, string> = {
+export const QUESTIONS: Record<RequiredField, string> = {
   ownerName: "When I talk to other people for you, I write about you by name, like \"Ana is free at 3pm\". What name should I use?",
   timezone: "What time zone are you in?",
-  days: "Which days of the week can I book meetings for you?",
-  window: "Between what times on those days?",
-  durationMin: "How long should a meeting be by default, in minutes?",
-  horizonDays: "How many days ahead can I offer times?",
   calendars: "Which of your calendars should count as busy?",
 };
 
@@ -177,7 +174,7 @@ function has(draft: Partial<Config>, field: Field): boolean {
   return draft[field] !== undefined;
 }
 
-export function nextField(draft: Partial<Config>): Field | undefined {
+export function nextField(draft: Partial<Config>): RequiredField | undefined {
   return REQUIRED_FIELDS.find((f) => !has(draft, f));
 }
 

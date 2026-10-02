@@ -52,14 +52,6 @@ Never invent the name, the time zone or the calendars: they come from the
 owner, Plow or the Mac. The other settings start at their defaults and are
 never guessed from the chat.
 
-## Asking late, once
-
-When a request needs something the defaults do not settle (the length of an
-in-person meeting, a day the owner has not offered), ask that one thing then,
-in the request's own flow, never in setup. If the answer is a standing
-preference ("always 45 minutes", "I don't take meetings on Fridays"), record it
-with `record-setup.ts` so it is never asked again.
-
 ## What setup fills by itself
 
 `setup-status.ts` answers two questions before they are asked: the owner's

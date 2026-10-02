@@ -85,9 +85,7 @@ Everything else starts at these defaults:
 - offers up to 14 days ahead.
 
 Change any of it later in plain words ("make my window 10 to 17", "I don't
-take meetings on Fridays"), or say "pause Meetly" / "resume Meetly". When a
-request needs something the defaults do not settle, Meetly asks that one thing
-then, and keeps a standing preference.
+take meetings on Fridays"), or say "pause Meetly" / "resume Meetly".
 
 ## Install (local)
 

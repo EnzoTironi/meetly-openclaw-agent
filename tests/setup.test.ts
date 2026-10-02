@@ -289,6 +289,17 @@ test("the Mac's time zone answers its question right after the name, so setup is
   }
 });
 
+test("a missing name does not stop the Mac's time zone from being filled, so the owner is never asked for what the Mac knows", async () => {
+  await withHomeAsync(async () => {
+    const s = await statusFilling({ ownerName: async () => undefined, timezone: async () => "America/Sao_Paulo", mac: async () => true });
+    assert.equal(s.status === "SETUP_NEEDED" && s.next, "ownerName");
+    assert.deepEqual(s.status === "SETUP_NEEDED" && [s.draft.ownerName, s.draft.timezone], [undefined, "America/Sao_Paulo"]);
+    // After the owner gives a name, the next question is the calendars, not the zone again.
+    const answered = record("ownerName", "Ana");
+    assert.ok("next" in answered && answered.next === "calendars");
+  });
+});
+
 test("a Mac that cannot answer, or answers something that is not a zone, leaves the question to the owner", async () => {
   const saved = process.env.MEETLY_HOME;
   process.env.MEETLY_HOME = tmpHome();
