@@ -21,17 +21,27 @@ export type Config = {
   paused?: boolean;
 };
 
-// The question order of the setup conversation.
+// Every setting the owner can change.
 export const FIELDS = ["ownerName", "timezone", "days", "window", "durationMin", "horizonDays", "calendars"] as const;
 export type Field = (typeof FIELDS)[number];
 
-export const QUESTIONS: Record<Field, string> = {
+// What setup cannot start without, in the order it asks: nobody but the owner,
+// Plow or the Mac can answer them. The other settings start at DEFAULTS and
+// change only when the owner says so.
+export const REQUIRED_FIELDS = ["ownerName", "timezone", "calendars"] as const;
+export type RequiredField = (typeof REQUIRED_FIELDS)[number];
+
+export const DEFAULTS = {
+  days: ["mon", "tue", "wed", "thu", "fri"] as Day[],
+  windowStart: "09:00",
+  windowEnd: "18:00",
+  durationMin: 30,
+  horizonDays: 14,
+};
+
+export const QUESTIONS: Record<RequiredField, string> = {
   ownerName: "When I talk to other people for you, I write about you by name, like \"Ana is free at 3pm\". What name should I use?",
   timezone: "What time zone are you in?",
-  days: "Which days of the week can I book meetings for you?",
-  window: "Between what times on those days?",
-  durationMin: "How long should a meeting be by default, in minutes?",
-  horizonDays: "How many days ahead can I offer times?",
   calendars: "Which of your calendars should count as busy?",
 };
 
@@ -164,14 +174,14 @@ function has(draft: Partial<Config>, field: Field): boolean {
   return draft[field] !== undefined;
 }
 
-export function nextField(draft: Partial<Config>): Field | undefined {
-  return FIELDS.find((f) => !has(draft, f));
+export function nextField(draft: Partial<Config>): RequiredField | undefined {
+  return REQUIRED_FIELDS.find((f) => !has(draft, f));
 }
 
 export function validateConfig(partial: Partial<Config>): Config {
-  const missing = FIELDS.filter((f) => !has(partial, f));
+  const missing = REQUIRED_FIELDS.filter((f) => !has(partial, f));
   if (missing.length) throw new Error(`setup is missing: ${missing.join(", ")}`);
-  const p = partial as Config;
+  const p = { ...DEFAULTS, ...partial } as Config;
   const windowMin = minutes(p.windowEnd) - minutes(p.windowStart);
   if (windowMin <= 0) throw new Error("the window must start before it ends");
   if (p.durationMin > windowMin) {

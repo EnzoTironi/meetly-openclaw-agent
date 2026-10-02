@@ -71,18 +71,21 @@ signed as Meetly.
 
 ## Setup
 
-The first time you text the line, Meetly asks, one question at a time:
+The first time you text the line, Meetly introduces itself in one line and
+gets to work on what you asked. It asks only what nobody else can tell it:
+your name and time zone, when your Plow profile and your Mac cannot supply
+them. Your busy calendars are read from the Mac: every calendar you show in
+Google Calendar counts.
 
-1. the name to use for you with other people,
-2. your time zone,
-3. which days you take meetings,
-4. between which hours,
-5. the default meeting length,
-6. how many days ahead it may offer,
-7. which of your calendars count as busy.
+Everything else starts at these defaults:
 
-Then it switches on the five-minute check. Change any answer later in plain
-words ("make my window 10 to 17"), or say "pause Meetly" / "resume Meetly".
+- days: Monday to Friday,
+- hours: 09:00 to 18:00,
+- meeting length: 30 minutes,
+- offers up to 14 days ahead.
+
+Change any of it later in plain words ("make my window 10 to 17", "I don't
+take meetings on Fridays"), or say "pause Meetly" / "resume Meetly".
 
 ## Install (local)
 

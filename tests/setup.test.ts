@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { FIELDS, holdHours, parseField, parseTime, readableCalendars, validateConfig, type Config } from "../skills/meetly/scripts/config.ts";
+import { DEFAULTS, REQUIRED_FIELDS, holdHours, parseField, parseTime, readableCalendars, validateConfig, type Config } from "../skills/meetly/scripts/config.ts";
 import { finish, record } from "../skills/meetly/scripts/record-setup.ts";
 import { status, statusFilling } from "../skills/meetly/scripts/setup-status.ts";
 import { readJson } from "../skills/meetly/scripts/store.ts";
@@ -40,17 +40,35 @@ test("empty home needs setup, starting with the owner's name", () => {
   });
 });
 
-test("recording the seven fields in order walks the questions", () => {
+test("only what nobody can infer is asked: the name, the time zone and the calendars", () => {
   withHome(() => {
+    assert.deepEqual([...REQUIRED_FIELDS], ["ownerName", "timezone", "calendars"]);
     const seen: (string | null)[] = [];
-    for (const [field, value] of ANSWERS) {
+    for (const [field, value] of ANSWERS.filter(([f]) => (REQUIRED_FIELDS as readonly string[]).includes(f))) {
       const out = record(field, value);
       assert.ok("next" in out);
       seen.push(out.next);
     }
-    assert.deepEqual(seen, [...FIELDS.slice(1), null]);
+    assert.deepEqual(seen, ["timezone", "calendars", null]);
     const s = status();
     assert.equal(s.status === "SETUP_NEEDED" && s.next, null);
+  });
+});
+
+test("the days, the hours and the horizon default, an answer given before finishing wins, and finishing fills the rest in", () => {
+  assert.deepEqual(DEFAULTS, { days: ["mon", "tue", "wed", "thu", "fri"], windowStart: "09:00", windowEnd: "18:00", durationMin: 30, horizonDays: 14 });
+  withHome((home) => {
+    record("ownerName", "Jean");
+    record("timezone", "America/Sao_Paulo");
+    record("calendars", CALENDARS);
+    record("durationMin", "45");
+    const s = status();
+    assert.deepEqual(s.status === "SETUP_NEEDED" && s.defaults, DEFAULTS);
+    finish(() => ({}), Date.parse("2026-09-26T12:00:00Z"));
+    const config = readJson<Config | null>(join(home, "config.json"), null)!;
+    assert.deepEqual([config.days, config.windowStart, config.windowEnd, config.durationMin, config.horizonDays],
+      [DEFAULTS.days, "09:00", "18:00", 45, 14]);
+    assert.equal(status().status, "READY");
   });
 });
 
@@ -125,6 +143,11 @@ test("a duration longer than the window is rejected", () => {
   for (const [f, v] of ANSWERS) Object.assign(draft, parseField(f, v));
   Object.assign(draft, parseField("window", "9-10"), parseField("durationMin", "90"));
   assert.throws(() => validateConfig(draft), /longer than/);
+  // The same goes for a default length against a narrow window.
+  const narrow: Partial<Config> = {};
+  for (const [f, v] of ANSWERS.filter(([f]) => (REQUIRED_FIELDS as readonly string[]).includes(f))) Object.assign(narrow, parseField(f, v));
+  Object.assign(narrow, parseField("window", "9-9:15"));
+  assert.throws(() => validateConfig(narrow), /longer than/);
 });
 
 test("finish writes config, removes the draft, registers once", () => {
@@ -150,10 +173,10 @@ test("finish keeps config.json when registration fails", () => {
   });
 });
 
-test("finish refuses an incomplete draft", () => {
+test("finish refuses a draft that still lacks the name, the time zone or the calendars", () => {
   withHome(() => {
     record("ownerName", "Jean");
-    assert.throws(() => finish(() => undefined, Date.now()));
+    assert.throws(() => finish(() => undefined, Date.now()), /setup is missing: timezone, calendars/);
   });
 });
 
@@ -241,17 +264,28 @@ test("with no name on Plow, or Plow unreachable, the owner is asked", async () =
   }
 });
 
-test("the Mac's time zone answers its question right after the name, so setup starts at the days", async () => {
+test("the Mac's time zone answers its question right after the name, so setup is left with the calendars", async () => {
   const saved = process.env.MEETLY_HOME;
   process.env.MEETLY_HOME = tmpHome();
   try {
     const s = await statusFilling({ ownerName: async () => "Ana Lima", timezone: async () => "America/Sao_Paulo" });
-    assert.equal(s.status === "SETUP_NEEDED" && s.next, "days");
+    assert.equal(s.status === "SETUP_NEEDED" && s.next, "calendars");
     assert.deepEqual(s.status === "SETUP_NEEDED" && [s.draft.ownerName, s.draft.timezone], ["Ana Lima", "America/Sao_Paulo"]);
   } finally {
     if (saved === undefined) delete process.env.MEETLY_HOME;
     else process.env.MEETLY_HOME = saved;
   }
+});
+
+test("a missing name does not stop the Mac's time zone from being filled, so the owner is never asked for what the Mac knows", async () => {
+  await withHomeAsync(async () => {
+    const s = await statusFilling({ ownerName: async () => undefined, timezone: async () => "America/Sao_Paulo", mac: async () => true });
+    assert.equal(s.status === "SETUP_NEEDED" && s.next, "ownerName");
+    assert.deepEqual(s.status === "SETUP_NEEDED" && [s.draft.ownerName, s.draft.timezone], [undefined, "America/Sao_Paulo"]);
+    // After the owner gives a name, the next question is the calendars, not the zone again.
+    const answered = record("ownerName", "Ana");
+    assert.ok("next" in answered && answered.next === "calendars");
+  });
 });
 
 test("a Mac that cannot answer, or answers something that is not a zone, leaves the question to the owner", async () => {
@@ -294,15 +328,18 @@ test("at the calendars question a Mac that is not connected is reported with the
   });
 });
 
-test("a time zone left for the owner says whether the Mac is connected; other questions and READY never probe it", async () => {
+test("a time zone left for the owner says whether the Mac is connected; a finished draft and READY never probe it", async () => {
   await withHomeAsync(async () => {
     const tz = await statusFilling({ ownerName: async () => "Ana", timezone: async () => undefined, mac: async () => false });
     assert.equal(tz.status === "SETUP_NEEDED" && tz.next, "timezone");
     assert.equal(tz.status === "SETUP_NEEDED" && tz.mac?.connected, false);
     record("timezone", "America/Sao_Paulo");
-    const days = await statusFilling({ mac: noProbe });
-    assert.equal(days.status === "SETUP_NEEDED" && days.mac, undefined);
-    for (const [field, value] of ANSWERS.slice(2)) record(field as never, value);
+    const cals = await statusFilling({ mac: async () => true });
+    assert.equal(cals.status === "SETUP_NEEDED" && cals.next, "calendars");
+    assert.deepEqual(cals.status === "SETUP_NEEDED" && cals.mac, { connected: true });
+    record("calendars", CALENDARS);
+    const done = await statusFilling({ mac: noProbe });
+    assert.equal(done.status === "SETUP_NEEDED" && done.mac, undefined);
     finish(() => ({}));
     assert.equal((await statusFilling({ mac: noProbe })).status, "READY");
   });
