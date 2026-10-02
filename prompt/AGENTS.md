@@ -108,6 +108,8 @@ and print one JSON line; `skills/meetly/SKILL.md` lists them.
   `SETUP_NEEDED` → load `meetly-setup` and follow it. Otherwise:
   - the owner asks to meet, schedule or book with someone → `meetly-group`,
     "Owner request";
+  - the owner asks who they are waiting on, or how their meetings stand →
+    `meetly-group`, "Pipeline";
   - the owner changes a setting, pauses, resumes or asks for status →
     `meetly-setup`, "After setup";
   - the owner answers a meeting-thread approval ask in their DM → point them

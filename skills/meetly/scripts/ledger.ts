@@ -261,6 +261,54 @@ export function cleanupList(ledger: Ledger): Request[] {
   return ledger.requests.filter((r) => (r.holdCleanup?.length ?? 0) > 0);
 }
 
+// One request as the owner sees it in the pipeline.
+export type PipelineItem = {
+  id: string;
+  name?: string;
+  topic: string;
+  status: Status;
+  chatUid?: string;
+  hoursWaiting?: number;
+  booked?: Booked;
+  updatedAt: string;
+};
+
+const WEEK = 7 * 24 * 3600_000;
+const hoursSince = (iso: string, now: number) => Math.max(0, Math.floor((now - Date.parse(iso)) / 3600_000));
+
+// Who is waiting on whom: offers the owner has to approve, offers the other
+// person has to answer (oldest first), meetings still to come (soonest
+// first; one with no recorded time last), and what closed in the past week.
+export function pipeline(ledger: Ledger, now: number): {
+  waitingOnOwner: PipelineItem[]; waitingOnThem: PipelineItem[]; booked: PipelineItem[]; closed: PipelineItem[];
+} {
+  const item = (r: Request, extra: Partial<PipelineItem> = {}): PipelineItem => {
+    const out: PipelineItem = { id: r.id, topic: r.topic, status: r.status, updatedAt: r.updatedAt, ...extra };
+    if (r.name !== undefined) out.name = r.name;
+    if (r.chatUid !== undefined) out.chatUid = r.chatUid;
+    return out;
+  };
+  const open = ledger.requests.filter((r) => r.status === "offered");
+  const upcoming = ledger.requests.filter((r) => r.status === "booked" && (!r.booked || Date.parse(r.booked.start) >= now));
+  const startOf = (r: Request) => (r.booked ? Date.parse(r.booked.start) : Infinity);
+  return {
+    waitingOnOwner: open.filter((r) => r.pendingOwner).map((r) => item(r, { hoursWaiting: hoursSince(r.pendingOwner!.askedAt, now) })),
+    waitingOnThem: open.filter((r) => !r.pendingOwner).map((r) => item(r, { hoursWaiting: hoursSince(r.offeredAt, now) }))
+      .sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
+    booked: upcoming.sort((a, b) => startOf(a) - startOf(b)).map((r) => item(r, r.booked ? { booked: r.booked } : {})),
+    closed: ledger.requests.filter((r) => r.status !== "offered" && r.status !== "booked" && now - Date.parse(r.updatedAt) <= WEEK)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 10).map((r) => item(r)),
+  };
+}
+
+// Everything the ledger holds for one person, newest first: what the meeting
+// was for, how it was to happen, where, for how long.
+export function historyFor(ledger: Ledger, handle: string): Pick<Request, "id" | "status" | "name" | "topic" | "format" | "location" | "durationMin" | "booked" | "createdAt">[] {
+  return ledger.requests.filter((r) => sameHandle(r.handle, handle))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map(({ id, status, name, topic, format, location, durationMin, booked, createdAt }) => ({ id, status, name, topic, format, location, durationMin, booked, createdAt }));
+}
+
 const EMPTY: Ledger = { requests: [] };
 
 function jsonArg(values: { json?: string; "json-file"?: string }): any {
@@ -318,6 +366,12 @@ if (isMain(import.meta.url)) {
         if (!Number.isFinite(hours) || hours < 0) throw new Error(`--hours must be a number >= 0, got ${values.hours}`);
         return { requests: expiredRequests(readJson<Ledger>(path, EMPTY), hours, now) };
       }
+      case "pipeline":
+        return pipeline(readJson<Ledger>(path, EMPTY), now);
+      case "history": {
+        if (values.handle === undefined) throw new Error("usage: ledger.ts history --handle H");
+        return { requests: historyFor(readJson<Ledger>(path, EMPTY), values.handle) };
+      }
       case "pending":
         return { requests: pendingOwnerList(readJson<Ledger>(path, EMPTY)) };
       case "cleanup":
@@ -328,7 +382,7 @@ if (isMain(import.meta.url)) {
         return { requests: dueReminders(readJson<Ledger>(path, EMPTY), now, lead) };
       }
       default:
-        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | cleanup | reminders");
+        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | pipeline | history | cleanup | reminders");
     }
   });
 }

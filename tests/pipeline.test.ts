@@ -1,0 +1,82 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { addRequest, historyFor, pipeline, updateRequest, type Ledger, type NewRequest } from "../skills/meetly/scripts/ledger.ts";
+import { cli, tmpHome } from "./helpers.ts";
+
+const ROOT = join(import.meta.dirname, "..");
+const flat = (path: string) => readFileSync(join(ROOT, path), "utf8").replace(/\s+/g, " ");
+const HOUR = 3600_000;
+const T0 = Date.parse("2026-10-01T12:00:00Z");
+const offer = { start: "2026-10-02T15:00:00Z", end: "2026-10-02T15:30:00Z", holdId: "h1", account: "jean@example.com" };
+const input = (handle: string, over: Record<string, unknown> = {}) =>
+  ({ origin: "owner", handle, name: handle, topic: "coffee", durationMin: 30, offered: [offer], ...over }) as NewRequest;
+
+function sample(): Ledger {
+  let l: Ledger = { requests: [] };
+  l = addRequest(l, input("+15550000001", { name: "Ana", topic: "intro call", chatUid: "c1" }), T0, "r_ana");
+  l = addRequest(l, input("+15550000002", { name: "Bia", topic: "lunch", format: "in_person", location: "Paulista" }), T0 - 30 * HOUR, "r_bia");
+  l = updateRequest(l, "r_ana", { pendingOwner: { start: "2026-10-03T22:00:00Z", end: "2026-10-03T22:30:00Z", askedAt: new Date(T0 - 5 * HOUR).toISOString() } }, T0);
+  l = addRequest(l, input("+15550000003", { name: "Caio", topic: "review" }), T0 - 2 * HOUR, "r_caio");
+  l = updateRequest(l, "r_caio", { status: "booked", booked: { start: "2026-10-05T15:00:00Z", end: "2026-10-05T15:30:00Z", account: "jean@example.com" } }, T0);
+  l = addRequest(l, input("+15550000004", { name: "Duda", topic: "demo" }), T0 - 3 * HOUR, "r_duda");
+  l = updateRequest(l, "r_duda", { status: "booked", booked: { start: "2026-09-30T15:00:00Z", end: "2026-09-30T15:30:00Z", account: "jean@example.com" } }, T0);
+  l = addRequest(l, input("+15550000005", { name: "Edu", topic: "sync" }), T0 - 80 * HOUR, "r_edu");
+  l = updateRequest(l, "r_edu", { status: "expired" }, T0 - 2 * HOUR);
+  l = addRequest(l, input("+15550000006", { name: "Fabi", topic: "old" }), T0 - 400 * HOUR, "r_fabi");
+  l = updateRequest(l, "r_fabi", { status: "dropped" }, T0 - 300 * HOUR);
+  return l;
+}
+
+test("the pipeline says who is waiting on whom, how long, what is booked next and what just closed", () => {
+  const p = pipeline(sample(), T0);
+  assert.deepEqual(p.waitingOnOwner.map((i) => [i.id, i.hoursWaiting]), [["r_ana", 5]]);
+  assert.deepEqual(p.waitingOnThem.map((i) => [i.id, i.hoursWaiting]), [["r_bia", 30]]);
+  // Upcoming only, soonest first; a meeting that already happened is not pipeline.
+  assert.deepEqual(p.booked.map((i) => i.id), ["r_caio"]);
+  assert.equal(p.booked[0]!.booked?.start, "2026-10-05T15:00:00Z");
+  // Closed within the last week, newest first.
+  assert.deepEqual(p.closed.map((i) => i.id), ["r_edu"]);
+  const ana = p.waitingOnOwner[0]!;
+  assert.deepEqual([ana.name, ana.topic, ana.chatUid, ana.status], ["Ana", "intro call", "c1", "offered"]);
+});
+
+test("a booking recorded before the booked time existed still shows, last", () => {
+  let l = addRequest({ requests: [] }, input("+15550000009", { name: "Gabi" }), T0, "r_gabi");
+  l = updateRequest(l, "r_gabi", { status: "booked", eventId: "ev_1" }, T0);
+  assert.deepEqual(pipeline(l, T0).booked.map((i) => i.id), ["r_gabi"]);
+});
+
+test("history lists everything with a person, newest first, so the goal and the format are read before asking", () => {
+  const closed = updateRequest(sample(), "r_bia", { status: "dropped" }, T0);
+  const l = addRequest(closed, input("+1 (555) 000-0002", { name: "Bia", topic: "coffee again" }), T0, "r_bia2");
+  const h = historyFor(l, "+15550000002");
+  assert.deepEqual(h.map((r) => r.id), ["r_bia2", "r_bia"]);
+  assert.deepEqual([h[1]!.topic, h[1]!.format, h[1]!.location, h[1]!.durationMin], ["lunch", "in_person", "Paulista", 30]);
+  assert.deepEqual(historyFor(l, "+15559999999"), []);
+});
+
+test("the CLI prints the pipeline and a person's history", () => {
+  const env = { MEETLY_HOME: tmpHome() };
+  cli("ledger.ts", ["add", "--json", JSON.stringify(input("+15550000001", { name: "Ana" }))], env);
+  const p = cli("ledger.ts", ["pipeline"], env);
+  assert.equal(p.status, 0, p.stderr);
+  assert.deepEqual(Object.keys(p.json), ["waitingOnOwner", "waitingOnThem", "booked", "closed"]);
+  assert.equal(p.json.waitingOnThem[0].name, "Ana");
+  const h = cli("ledger.ts", ["history", "--handle", "5550000001"], env);
+  assert.equal(h.json.requests[0].topic, "coffee");
+  assert.notEqual(cli("ledger.ts", ["history"], env).status, 0);
+});
+
+test("the owner can ask who they are waiting on, and Meetly looks before it asks the other person", () => {
+  const group = flat("skills/meetly-group/SKILL.md");
+  assert.ok(group.includes("## Pipeline"));
+  assert.ok(group.includes("run `ledger.ts pipeline`"));
+  assert.ok(group.includes("next step is advice, never a claim about what happened"));
+  assert.ok(group.includes("## Before you ask the other person"));
+  assert.ok(group.includes("run `ledger.ts history --handle <their handle>`"));
+  assert.ok(group.includes("Never ask the other person for something you can find"));
+  assert.ok(flat("prompt/AGENTS.md").includes("the owner asks who they are waiting on, or how their meetings stand → `meetly-group`, \"Pipeline\""));
+  assert.ok(flat("skills/meetly/SKILL.md").includes("`pipeline` \\| `history --handle H`"));
+});

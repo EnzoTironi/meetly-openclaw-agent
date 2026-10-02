@@ -121,6 +121,27 @@ In the owner's DM:
 5. Follow "Offer times" with `origin: owner`.
 6. Reply to the owner in one line: group opened, times offered and held.
 
+## Pipeline
+
+When the owner asks who they are waiting on, or how their meetings stand,
+run `ledger.ts pipeline` and answer in their language, one short line per
+person: what the meeting is for, and which of these it is: waiting on the
+owner (an out-of-hours time to approve), waiting on the other person (say
+for how many hours), booked (day and time), or closed in the past week. For
+an offer that has waited a day or more, suggest a next step, such as new
+times; the next step is advice, never a claim about what happened. State only
+what the ledger says.
+
+## Before you ask the other person
+
+Look first: the contact card (`contacts`, `contact.ts`), the thread, and the
+person's history: run `ledger.ts history --handle <their handle>`, which lists
+earlier requests with that person: what the meeting was for, how it was to
+happen, where and for how long. Use what you find, and keep a request's topic and format as it
+was. Never ask the other person for something you can find, or that the
+context already answers ("in person or on video?" when the owner said video).
+What is the owner's to say (the goal, the place) is asked of the owner.
+
 ## Meeting format
 
 `format` is how the meeting happens: `meet` (Meetly creates a Google Meet),
