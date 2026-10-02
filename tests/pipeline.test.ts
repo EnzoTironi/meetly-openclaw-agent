@@ -114,9 +114,9 @@ test("the owner can ask who they are waiting on, and Meetly looks before it asks
   assert.ok(flat("skills/meetly-setup/SKILL.md").includes("`record-setup.ts --field videoProvider --value <their Zoom room link>`"));
   assert.ok(flat("README.md").includes("give Meetly your personal room link"));
   assert.ok(flat("skills/meetly-poll/SKILL.md").includes("`blocklist.ts check --handle <sender>` says `blocked`, skip"));
-  assert.ok(group.includes("## Before you ask the other person"));
-  assert.ok(group.includes("run `ledger.ts history --handle <their handle>`"));
-  assert.ok(group.includes("Never ask the other person for something you can find"));
+  assert.ok(group.includes("## Research before proposing"));
+  assert.ok(group.includes("and `ledger.ts history --handle <their handle>`"));
+  assert.ok(group.includes("Never ask the other person for something these sources answer"));
   assert.ok(flat("prompt/AGENTS.md").includes("the owner asks who they are waiting on, or how their meetings stand → `meetly-group`, \"Pipeline\""));
   assert.ok(flat("skills/meetly/SKILL.md").includes("`pipeline` \\| `monitor` \\| `history --handle H`"));
 });
@@ -143,19 +143,20 @@ test("a request keeps a dated log of what happened, newest last, bounded, and re
   assert.equal(cli("ledger.ts", ["log", "--id", id], env).json.log.length, 1);
 });
 
-test("the monitor lists what waits on the owner or on Meetly too long, once, and never what waits on the other person", () => {
+test("the monitor lists old offers waiting on the owner, Meetly or the other person once", () => {
   const l = sample();
   // Ana waited 5 h on the owner (a nudge is due after 4); Bia was held 30 h and never delivered (due after 1).
   const m = monitor(l, T0);
   assert.deepEqual(m.ownerWaiting.map((i) => [i.id, i.hoursWaiting, i.chatUid, i.nextStep]), [["r_ana", 5, "c1", "owner decision needed"]]);
   assert.deepEqual(m.undelivered.map((i) => [i.id, i.hoursWaiting]), [["r_bia", 30]]);
+  assert.deepEqual(m.waitingOnThem.map((i) => [i.id, i.hoursWaiting, i.chatUid]), [["r_gus", 31, "c9"]]);
   // Too early, or waiting on them, closed or booked: nothing.
   assert.deepEqual(monitor(l, T0 - 2 * HOUR).ownerWaiting, []);
   const none = monitor(l, T0);
-  assert.equal(JSON.stringify(none).includes("r_gus") || JSON.stringify(none).includes("r_caio") || JSON.stringify(none).includes("r_edu"), false);
+  assert.equal(JSON.stringify(none).includes("r_caio") || JSON.stringify(none).includes("r_edu"), false);
   // A nudge is sent once per ask: after it, nothing is due until the owner is asked again.
-  const nudged = updateRequest(updateRequest(l, "r_ana", { nudgedAt: new Date(T0).toISOString() }, T0), "r_bia", { nudgedAt: new Date(T0).toISOString() }, T0);
-  assert.deepEqual([monitor(nudged, T0 + 10 * HOUR).ownerWaiting, monitor(nudged, T0 + 10 * HOUR).undelivered], [[], []]);
+  const nudged = updateRequest(updateRequest(updateRequest(l, "r_ana", { nudgedAt: new Date(T0).toISOString() }, T0), "r_bia", { nudgedAt: new Date(T0).toISOString() }, T0), "r_gus", { personNudgedAt: new Date(T0).toISOString() }, T0);
+  assert.deepEqual([monitor(nudged, T0 + 10 * HOUR).ownerWaiting, monitor(nudged, T0 + 10 * HOUR).undelivered, monitor(nudged, T0 + 10 * HOUR).waitingOnThem], [[], [], []]);
   const asked = updateRequest(nudged, "r_ana", { pendingOwner: { start: "2026-10-04T22:00:00Z", end: "2026-10-04T22:30:00Z", askedAt: new Date(T0 + 1 * HOUR).toISOString() } }, T0 + 1 * HOUR);
   assert.deepEqual(monitor(asked, T0 + 6 * HOUR).ownerWaiting.map((i) => i.id), ["r_ana"]);
   assert.throws(() => updateRequest(l, "r_ana", { nudgedAt: "soon" }, T0), /nudgedAt/);
@@ -164,10 +165,10 @@ test("the monitor lists what waits on the owner or on Meetly too long, once, and
 test("the CLI prints the monitor, and the poll reminds the owner once, with advice and no claims", () => {
   const env = { MEETLY_HOME: tmpHome() };
   cli("ledger.ts", ["add", "--json", JSON.stringify(input("+15550000001", { name: "Ana" }))], env);
-  assert.deepEqual(cli("ledger.ts", ["monitor"], env).json, { ownerWaiting: [], undelivered: [] });
+  assert.deepEqual(cli("ledger.ts", ["monitor"], env).json, { ownerWaiting: [], undelivered: [], waitingOnThem: [] });
   const poll = flat("skills/meetly-poll/SKILL.md");
   assert.ok(poll.includes("Run `ledger.ts monitor`"));
   assert.ok(poll.includes("`ledger.ts update --id <id> --json '{\"nudgedAt\":\"<now ISO>\"}'` so it is sent once"));
   assert.ok(poll.includes("never claim that anything happened"));
-  assert.ok(poll.includes("never offer new times without the owner's yes"));
+  assert.ok(poll.includes("Never contact the other person before approval"));
 });

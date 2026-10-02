@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  addRequest, saveRequest, cleanupList, pendingOwnerList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest, monitor,
+  addRequest, saveRequest, cleanupList, pendingOwnerList, ownerApprovalList, expiredRequests, findByChat, findOpenByHandle, normalizeHandle, sameHandle, updateRequest, monitor, stageOf,
   type Ledger, type NewRequest,
 } from "../skills/meetly/scripts/ledger.ts";
 import { cli, tmpHome } from "./helpers.ts";
@@ -192,6 +192,18 @@ test("pendingOwner is set, listed and cleared", () => {
   assert.deepEqual(pendingOwnerList(l), []);
 });
 
+test("owner gate requests wait for owner approval and appear in the approvals list", () => {
+  let l = addRequest(empty(), input(), T0, "r_1");
+  l = updateRequest(l, "r_1", { ownerApprovalAt: new Date(T0).toISOString() }, T0);
+  assert.deepEqual(ownerApprovalList(l).map((r) => r.id), ["r_1"]);
+  assert.equal(stageOf(l.requests[0]!, T0), "waiting_on_us");
+  assert.equal(monitor(l, T0 + 5 * HOUR).ownerWaiting[0]!.hoursWaiting, 5);
+  assert.throws(() => updateRequest(l, "r_1", { ownerApprovalAt: "soon" }, T0), /ownerApprovalAt/);
+  l = updateRequest(l, "r_1", { ownerApprovalAt: null }, T0);
+  assert.deepEqual(ownerApprovalList(l), []);
+  assert.equal(stageOf(l.requests[0]!, T0), "held");
+});
+
 test("CLI add, find, update, expired and cleanup round-trip", () => {
   const home = tmpHome();
   const env = { MEETLY_HOME: home };
@@ -213,6 +225,10 @@ test("CLI add, find, update, expired and cleanup round-trip", () => {
   const pend = { start: "2026-10-03T10:00:00-03:00", end: "2026-10-03T10:30:00-03:00", askedAt: "2026-09-28T12:00:00Z" };
   cli("ledger.ts", ["update", "--id", id, "--json", JSON.stringify({ pendingOwner: pend })], env);
   assert.deepEqual(cli("ledger.ts", ["pending"], env).json.requests.map((r: { id: string }) => r.id), [id]);
+  cli("ledger.ts", ["update", "--id", id, "--json", `{"ownerApprovalAt":"${new Date(T0).toISOString()}"}`], env);
+  assert.deepEqual(cli("ledger.ts", ["approvals"], env).json.requests.map((r: { id: string }) => r.id), [id]);
+  cli("ledger.ts", ["update", "--id", id, "--json", '{"ownerApprovalAt":null}'], env);
+  assert.deepEqual(cli("ledger.ts", ["approvals"], env).json.requests, []);
   const dup = cli("ledger.ts", ["add", "--json", JSON.stringify(input())], env);
   assert.equal(dup.status, 1);
   assert.match(dup.stderr, /already exists/);

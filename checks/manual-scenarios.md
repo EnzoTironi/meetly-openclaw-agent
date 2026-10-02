@@ -150,6 +150,13 @@ ahead so its reminder fires during the run.
     - Expect: booking keeps the selected offer's travel holds and deletes the
       other offers' meeting and travel holds. Decline, re-offer, or expiry
       deletes every related hold.
+24. [ ] **Inbound owner gate.** Turn `ownerGate` on and send a scheduling
+     request from a second account.
+    - Expect: Meetly creates holds and asks the owner privately; it opens no
+      group and sends no proposed time to the contact before approval.
+    - Approve: expect the held times to appear in one meeting group. Decline:
+      expect all holds to be deleted and no message to the contact. Leave it
+      unanswered: expect the holds to expire and the owner to be notified.
 
 Known limit: a meeting moved *earlier* in Google Calendar, to before its old
 reminder window, is not reminded. Meetly only re-reads the event when the

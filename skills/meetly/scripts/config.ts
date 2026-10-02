@@ -24,12 +24,14 @@ export type Config = {
   movable?: string[];
   // Minutes to leave free before and after an in-person meeting.
   travelMin?: number;
+  // When enabled, inbound requests wait for owner approval before contacting the person.
+  ownerGate?: boolean;
   setupDoneAt?: string;
   paused?: boolean;
 };
 
 // Every setting the owner can change.
-export const FIELDS = ["ownerName", "timezone", "days", "window", "durationMin", "horizonDays", "calendars", "videoProvider", "movable", "travel"] as const;
+export const FIELDS = ["ownerName", "timezone", "days", "window", "durationMin", "horizonDays", "calendars", "videoProvider", "movable", "travel", "ownerGate"] as const;
 export type Field = (typeof FIELDS)[number];
 
 // What setup cannot start without, in the order it asks: nobody but the owner,
@@ -182,6 +184,12 @@ export function parseField(field: string, value: string): Partial<Config> {
       }
       return { travelMin: minutes };
     }
+    case "ownerGate": {
+      const v = value.trim().toLowerCase();
+      if (["on", "yes", "true", "enabled"].includes(v)) return { ownerGate: true };
+      if (["off", "no", "false", "disabled"].includes(v)) return { ownerGate: false };
+      throw new Error(`ownerGate must be on or off, got "${value}"`);
+    }
     case "calendars": {
       let parsed: unknown;
       try {
@@ -239,6 +247,10 @@ export function validateConfig(partial: Partial<Config>): Config {
       throw new Error(`travel must be 1 to 180 minutes, got ${JSON.stringify(p.travelMin)}`);
     }
     config.travelMin = p.travelMin;
+  }
+  if (p.ownerGate !== undefined) {
+    if (typeof p.ownerGate !== "boolean") throw new Error("ownerGate must be true or false");
+    config.ownerGate = p.ownerGate;
   }
   if (p.setupDoneAt !== undefined) config.setupDoneAt = p.setupDoneAt;
   if (p.paused !== undefined) config.paused = p.paused;

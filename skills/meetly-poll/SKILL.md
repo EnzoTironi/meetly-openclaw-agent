@@ -78,12 +78,13 @@ with no meeting thread, use `owner-chat.ts` and target the printed `chatUid`.
       batch>` and go to step 6.
 5. Run `cursor.ts set <highest rowid in the batch>`.
 6. Maintenance:
-   - For each request from `ledger.ts expired`: delete its meeting and travel holds ("Holds" in
-     `meetly-group`), then `ledger.ts update --id <id> --json
-     '{"status":"expired","pendingOwner":null}'`. If it has a `chatUid`, tell
-     the group the held times were released; this also notifies the owner,
-     and ask the owner there, in one line, whether to offer new times (never
-     offer new times without the owner's yes).
+   - For each request from `ledger.ts expired`: delete its meeting and travel
+     holds ("Holds" in `meetly-group`), then `ledger.ts update --id <id>
+     --json '{"status":"expired","pendingOwner":null,"ownerApprovalAt":null}'`.
+     If it has a `chatUid`, tell the group the held times were released; this
+     also notifies the owner. If `ownerApprovalAt` was set and there is no
+     `chatUid`, tell the owner in their DM that the approval expired and the
+     holds were released. Never contact the other person before approval.
    - Run `ledger.ts monitor`: it lists what waits on the owner, Meetly or the
      other person too long. For each `waitingOnThem` item, read the latest
      messages in that meeting thread first. If the person has already
@@ -98,6 +99,9 @@ with no meeting thread, use `owner-chat.ts` and target the printed `chatUid`.
      owner in that meeting thread (`message`, that chat uid as its target), in
      one line and in their language, that the time they were asked about is
      still waiting for their yes or no, with its `nextStep`. For each
+     `ownerWaiting` item without a `chatUid` and with `ownerApprovalAt`, remind
+     the owner in their DM (`owner-chat.ts`) which person's held options await
+     approval. For each
      `undelivered` item, tell the owner in their DM that the times for
      <name> are held but the group was never confirmed, and ask whether to
      try again. Say only what the ledger says: never claim that anything

@@ -59,6 +59,9 @@ signed as Meetly.
 - **Leaves travel time around in-person meetings when you set it.** Meetly
   checks and holds the buffer before and after the meeting; video and phone
   meetings do not use it. The default is no travel buffer.
+- **Can ask you before answering inbound meeting requests.** Turn on
+  `ownerGate` to hold proposed times for your approval in your DM before
+  Meetly contacts the other person. It is off by default.
 - **Holds expire.** No answer in 48 hours: the holds are deleted and the
   group is told the times were released.
 - **Overlaps only with your word.** Meetly books over an existing event only

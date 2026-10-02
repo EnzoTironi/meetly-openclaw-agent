@@ -14,8 +14,10 @@ Messages to the other person come from Meetly, in the third person, using
 `ownerName`, in their language (see "Examples"). Reply in the current
 conversation with `message` (action `send`, omit target) or a normal final reply.
 The owner is in every meeting thread: confirmations, notifications and
-approval asks go there once, where the guest receives them too. From the
-owner's main DM, a follow-up to a known meeting thread uses `plow_reply_to`.
+approval asks go there once, where the guest receives them too. The configured
+pre-thread owner gate is the exception: its approval request goes to the
+owner's DM because no meeting thread exists yet. From the owner's main DM, a
+follow-up to a known meeting thread uses `plow_reply_to`.
 An unattended poll has no current conversation and uses `message` with the
 known meeting chat uid as its target.
 
@@ -77,6 +79,14 @@ free there.
    If it fails, delete each meeting and travel hold just
    created, stop and report the ledger error to the owner; do not send an
    offer. If any deletion fails, report those hold ids too.
+   - **Owner gate:** when `origin` is `inbound` and `config.ownerGate` is
+     true, update the saved request with `ownerApprovalAt: <now ISO>`. Do not
+     open a group or send any proposed time to the other person yet. Run
+     `owner-chat.ts`, then use `message` (`action: send`, channel `plow`,
+     accountId `chat`, target its `chatUid`) to send the owner one private
+     message with the person's name, topic, and held time options, asking for
+     yes or no. The owner approval flow below resumes it. The holds expire
+     normally if the owner does not answer.
 6. Deliver the times:
    - An open request that already has a `chatUid`: post the new times there.
    - Otherwise open a group with the person's handle and the opener: run
@@ -130,12 +140,41 @@ In the owner's DM:
 5. Follow "Offer times" with `origin: owner`.
 6. Reply to the owner in one line: group opened, times offered and held.
 
+## Approve an inbound request
+
+This section applies only in the owner's DM. Before interpreting a short yes
+or no as a new scheduling instruction, run `ledger.ts approvals` and check
+whether the owner is answering a pending inbound request. Match by the person
+and topic in the approval message; if more than one fits, ask which one.
+
+- **Yes:** re-read the calendar and run `slots.ts --at <start>` for every
+  held time, passing that offer's meeting and travel hold ids with
+  `--allow-overlap` (and `--travel <config.travelMin>` for in-person). If the
+  times are still free, clear the gate with `ledger.ts update --id <id> --json
+  '{"ownerApprovalAt":null}'`, then open the group using the ordinary
+  "Offer times" delivery steps with idempotency key `owner-gate:<id>` and save
+  its `chatUid`. If any held time is no longer free, do not send the stale
+  options: clean the old holds (queue failed deletes in `holdCleanup`),
+  calculate and save fresh options, set a new `ownerApprovalAt`, and ask the
+  owner to approve those exact times.
+- **No:** delete every meeting and travel hold recorded in `offered[]`, then
+  update the request to `{"status":"dropped","ownerApprovalAt":null}`.
+  If any delete fails, record that `{holdId, account}` in `holdCleanup` before
+  closing the request.
+  No message has gone to the other person, so do not contact them.
+- **No clear answer:** leave the request and holds as they are and ask whether
+  to approve or decline.
+
+After either decision, tell the owner what Meetly did. Approval authorizes
+only sending the displayed times to this person; it does not authorize
+booking a meeting.
+
 ## Pipeline
 
 When the owner asks who they are waiting on, or how their meetings stand,
 run `ledger.ts pipeline` and answer in their language, one short line per
 person: what the meeting is for, its `stage` and its `nextStep`. Stages:
-`waiting_on_us` (an out-of-hours time for the owner to approve),
+`waiting_on_us` (an out-of-hours time or inbound offer awaiting owner approval),
 `held` (times held but never delivered to a group: waiting on Meetly, not on
 the person), `sent` (offered less than a day ago), `waiting_on_them` (no
 answer in a day or more, with the hours), `confirmed` (booked: day and time;

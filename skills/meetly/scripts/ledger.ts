@@ -41,6 +41,8 @@ export type Request = {
   eventId?: string;
   holdCleanup?: HoldRef[];
   pendingOwner?: PendingOwner;
+  // Inbound request is held for explicit owner approval before outreach.
+  ownerApprovalAt?: string;
   format?: Format;
   locale?: string;
   booked?: Booked;
@@ -68,10 +70,11 @@ const LOG_TEXT_MAX = 300;
 export type Ledger = { requests: Request[] };
 
 export type NewRequest = Omit<Request,
-  "id" | "status" | "eventId" | "pendingOwner" | "booked" | "meetUrl" | "roomUrl" | "reminder" | "offeredAt" | "closedAt" | "nudgedAt" | "personNudgedAt" | "log" | "createdAt" | "updatedAt">;
+  "id" | "status" | "eventId" | "pendingOwner" | "ownerApprovalAt" | "booked" | "meetUrl" | "roomUrl" | "reminder" | "offeredAt" | "closedAt" | "nudgedAt" | "personNudgedAt" | "log" | "createdAt" | "updatedAt">;
 export type Patch = Partial<Pick<Request,
   "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic" | "format" | "locale">> & {
   pendingOwner?: PendingOwner | null;
+  ownerApprovalAt?: string | null;
   booked?: Booked | null;
   meetUrl?: string | null;
   roomUrl?: string | null;
@@ -84,11 +87,11 @@ const STATUSES: readonly Status[] = ["offered", "booked", "dropped", "expired"];
 const FORMATS: readonly Format[] = ["meet", "in_person", "phone", "unknown"];
 const OUTCOMES: readonly Reminder["outcome"][] = ["sent", "cancelled", "no-link"];
 const PATCH_KEYS = [
-  "status", "chatUid", "eventId", "offered", "holdCleanup", "name", "location", "allowOverlap", "constraints", "topic", "pendingOwner",
+  "status", "chatUid", "eventId", "offered", "holdCleanup", "name", "location", "allowOverlap", "constraints", "topic", "pendingOwner", "ownerApprovalAt",
   "format", "locale", "booked", "meetUrl", "roomUrl", "reminder", "nudgedAt", "personNudgedAt",
 ];
 // Keys a patch can clear with null.
-const NULLABLE = ["pendingOwner", "booked", "meetUrl", "roomUrl", "reminder", "personNudgedAt"] as const;
+const NULLABLE = ["pendingOwner", "ownerApprovalAt", "booked", "meetUrl", "roomUrl", "reminder", "personNudgedAt"] as const;
 
 const isDate = (t: unknown) => typeof t === "string" && !Number.isNaN(Date.parse(t));
 
@@ -196,7 +199,7 @@ export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: s
   const at = new Date(now).toISOString();
   // A new offer is never booked: a booking, its link and its reminder are
   // only ever set through update, where they are validated.
-  const { booked: _b, meetUrl: _m, roomUrl: _z, reminder: _r, closedAt: _c, nudgedAt: _n, personNudgedAt: _pn, log: _l, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "roomUrl" | "reminder" | "closedAt" | "nudgedAt" | "personNudgedAt" | "log">>;
+  const { booked: _b, meetUrl: _m, roomUrl: _z, reminder: _r, closedAt: _c, nudgedAt: _n, personNudgedAt: _pn, ownerApprovalAt: _oa, log: _l, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "roomUrl" | "reminder" | "closedAt" | "nudgedAt" | "personNudgedAt" | "ownerApprovalAt" | "log">>;
   const request: Request = { ...fields, format, id, status: "offered", offeredAt: at, createdAt: at, updatedAt: at };
   return { requests: [...ledger.requests, request] };
 }
@@ -224,6 +227,7 @@ export function saveRequest(ledger: Ledger, input: NewRequest, now: number, id: 
     format: validated.format === "unknown" ? existing.format ?? "unknown" : validated.format,
     locale: input.locale ?? existing.locale,
     personNudgedAt: undefined,
+    ownerApprovalAt: undefined,
     holdCleanup,
     createdAt: existing.createdAt,
     updatedAt: new Date(now).toISOString(),
@@ -244,6 +248,7 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
       throw new Error(`pendingOwner needs valid start, end and askedAt: ${JSON.stringify(pending)}`);
     }
   }
+  if (patch.ownerApprovalAt !== undefined && patch.ownerApprovalAt !== null && !isDate(patch.ownerApprovalAt)) throw new Error(`ownerApprovalAt must be a time, got ${JSON.stringify(patch.ownerApprovalAt)}`);
   if (patch.format !== undefined) checkFormat(patch.format);
   if (patch.locale !== undefined) checkLocale(patch.locale);
   if (patch.booked) checkBooked(patch.booked);
@@ -308,6 +313,10 @@ export function pendingOwnerList(ledger: Ledger): Request[] {
   return ledger.requests.filter((r) => r.status === "offered" && r.pendingOwner !== undefined);
 }
 
+export function ownerApprovalList(ledger: Ledger): Request[] {
+  return ledger.requests.filter((r) => r.status === "offered" && r.ownerApprovalAt !== undefined);
+}
+
 // Booked Meets whose link is due in the group: from `leadMin` before the
 // start until `graceMin` after it, once.
 export function dueReminders(ledger: Ledger, now: number, leadMin: number, graceMin = 5): Request[] {
@@ -358,7 +367,7 @@ const NEXT_STEP: Record<Stage, string> = {
 export function stageOf(r: Request, now: number): Stage {
   if (r.status === "booked") return "confirmed";
   if (r.status !== "offered") return "passed";
-  if (r.pendingOwner) return "waiting_on_us";
+  if (r.pendingOwner || r.ownerApprovalAt) return "waiting_on_us";
   if (!r.chatUid) return "held";
   return hoursSince(r.offeredAt, now) >= STALE_HOURS ? "waiting_on_them" : "sent";
 }
@@ -376,7 +385,7 @@ export function pipeline(ledger: Ledger, now: number): {
     if (r.name !== undefined) out.name = r.name;
     return out;
   };
-  const waiting = (r: Request) => ({ hoursWaiting: hoursSince(r.pendingOwner ? r.pendingOwner.askedAt : r.offeredAt, now) });
+  const waiting = (r: Request) => ({ hoursWaiting: hoursSince(r.pendingOwner?.askedAt ?? r.ownerApprovalAt ?? r.offeredAt, now) });
   const open = ledger.requests.filter((r) => r.status === "offered");
   const upcoming = ledger.requests.filter((r) => r.status === "booked" && (!r.booked || Date.parse(r.booked.start) >= now));
   const startOf = (r: Request) => (r.booked ? Date.parse(r.booked.start) : Infinity);
@@ -400,7 +409,7 @@ export const PERSON_NUDGE_HOURS = 24;
 export function monitor(ledger: Ledger, now: number): {
   ownerWaiting: (PipelineItem & { chatUid?: string })[]; undelivered: PipelineItem[]; waitingOnThem: (PipelineItem & { chatUid: string; handle: string })[];
 } {
-  const asked = (r: Request) => r.pendingOwner?.askedAt;
+  const asked = (r: Request) => r.pendingOwner?.askedAt ?? r.ownerApprovalAt;
   const due = (r: Request, since: string, hours: number) =>
     hoursSince(since, now) >= hours && (!r.nudgedAt || Date.parse(r.nudgedAt) < Date.parse(since));
   const personDue = (r: Request) => hoursSince(r.offeredAt, now) >= PERSON_NUDGE_HOURS &&
@@ -508,6 +517,8 @@ if (isMain(import.meta.url)) {
       }
       case "pending":
         return { requests: pendingOwnerList(readJson<Ledger>(path, EMPTY)) };
+      case "approvals":
+        return { requests: ownerApprovalList(readJson<Ledger>(path, EMPTY)) };
       case "cleanup":
         return { requests: cleanupList(readJson<Ledger>(path, EMPTY)).map((r) => ({ id: r.id, holdCleanup: r.holdCleanup })) };
       case "reminders": {
@@ -516,7 +527,7 @@ if (isMain(import.meta.url)) {
         return { requests: dueReminders(readJson<Ledger>(path, EMPTY), now, lead) };
       }
       default:
-        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | pipeline | monitor | history | log | cleanup | reminders");
+        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | approvals | pipeline | monitor | history | log | cleanup | reminders");
     }
   });
 }
