@@ -8,7 +8,7 @@ import { listEvents, stamp, type CalEvent } from "./busy.ts";
 import { loadConfig, type Config } from "./config.ts";
 import type { BridgeOptions } from "./mac.ts";
 
-export type OwnerEvent = { id: string; account: string; title: string; start: string; end: string };
+type OwnerEvent = { id: string; account: string; title: string; start: string; end: string };
 
 export function ownerEvents(events: CalEvent[]): OwnerEvent[] {
   const out: OwnerEvent[] = [];

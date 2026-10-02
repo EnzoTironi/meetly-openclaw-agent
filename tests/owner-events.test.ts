@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { listOwnerEvents, ownerEvents } from "../skills/meetly/scripts/owner-events.ts";
 import { writeJson } from "../skills/meetly/scripts/store.ts";
-import { cli, tmpHome } from "./helpers.ts";
+import { cli, macBridge, tmpHome, type MacCall as Call } from "./helpers.ts";
 
 const TZ = "America/Sao_Paulo";
 const range = { from: "2026-10-01T00:00:00-03:00", to: "2026-10-02T00:00:00-03:00" };
@@ -14,18 +14,6 @@ const gog = (id: string, summary: string, start: string, end: string, extra: Rec
   status: "confirmed", attendees: [{ email: "ana@example.com", responseStatus: "accepted" }], organizer: { email: "boss@example.com" },
   description: "dial-in 1234", location: "Room 4", ...extra,
 });
-
-type Call = { argv: string[] };
-function macBridge(reply: (argv: string[]) => string | undefined, calls: Call[] = []): typeof fetch {
-  return (async (_url: string | URL | Request, init?: RequestInit) => {
-    const argv = JSON.parse(String(init?.body)).params.arguments.argv as string[];
-    calls.push({ argv });
-    const output = reply(argv);
-    const out = output === undefined ? { exit_code: 1, output: "gog: 401" } : { exit_code: 0, output };
-    const result = { content: [{ type: "text", text: JSON.stringify(out) }] };
-    return new Response(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result })}\n\n`);
-  }) as typeof fetch;
-}
 
 test("the model sees an event's title, id, account and times, and nothing else", () => {
   const events = [
