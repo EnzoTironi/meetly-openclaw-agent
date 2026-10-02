@@ -128,27 +128,28 @@ In the owner's DM, when the owner cancels, moves or clears time ("cancel my
 lunch with Ana", "remove all my appointments today", "move the call to 3pm"):
 
 1. Run `owner-events.ts --from <ISO> --to <ISO>` for the owner's range. It
-   prints `{events: [{id, account, title, start, end}], degraded}`: only the
-   title, id, account and times, read on the Mac, so match the owner's words
-   against the titles. Never run `plow-gog calendar events` yourself for
+   prints `{events: [{id, account, calendarId, title, start, end}], degraded}`:
+   only the title, id, account, calendar and times, read on the Mac, so match
+   the owner's words against the titles. Never run `plow-gog calendar events` yourself for
    this. For each event, run `ledger.ts find --event <event id> --account <its
    account>`. An event with no request (or one whose request is not `booked`)
    is not a Meetly meeting: handle it as the owner asked and tell no one. An
-   account in `degraded` could not be read: say so, and never claim there was
-   nothing to cancel there.
+   account in `degraded` could not be fully read (it failed, or its listing
+   was cut at 100 events): say so, and never claim there was nothing to
+   cancel there.
 2. Act on the owner's words. Their own instruction that covers the meeting
    ("all", "everything today", the person's name) is the approval: do not ask
    again. Ask once only when the words truly leave it open which meetings
    are meant. When the owner repeats the instruction instead of answering,
    that is the yes.
-3. For each booked request, with `<account>` = the account the event was
-   read from:
-   - **Cancel:** `plow-gog calendar delete primary <eventId> --send-updates
+3. For each booked request, with `<account>` and `<calendarId>` those the
+   event was read from (never assume `primary`):
+   - **Cancel:** `plow-gog calendar delete <calendarId> <eventId> --send-updates
      all --force --account <account>`. Then `ledger.ts update --id <id>
      --json '{"status":"cancelled","pendingOwner":null}'`. If the delete
      fails, change nothing else, tell the owner and send nothing to the
      group.
-   - **Move:** `plow-gog calendar update primary <eventId> --from <start>
+   - **Move:** `plow-gog calendar update <calendarId> <eventId> --from <start>
      --to <end> --send-updates all --account <account> --json`, then
      record it as in "Book the event" steps 1 and 2.
    - If a step after the calendar change fails, retry it once in this turn,

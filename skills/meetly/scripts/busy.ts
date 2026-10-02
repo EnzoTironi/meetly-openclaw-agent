@@ -18,6 +18,7 @@ type Stamp = string | { dateTime?: string; date?: string } | undefined;
 export type CalEvent = {
   id?: string;
   account?: string;
+  CalendarID?: string;
   summary?: string;
   startLocal?: string;
   endLocal?: string;
@@ -123,11 +124,13 @@ export async function listEvents(
   config: Pick<Config, "calendars">,
   range: { from: string; to: string },
   opts: BridgeOptions = {},
-): Promise<{ events: CalEvent[]; degraded: string[] }> {
+): Promise<{ events: CalEvent[]; degraded: string[]; incomplete: string[] }> {
   const byAccount = new Map<string, string[]>();
   for (const c of config.calendars) byAccount.set(c.account, [...(byAccount.get(c.account) ?? []), c.id]);
   const events: CalEvent[] = [];
   const degraded: string[] = [];
+  // Accounts whose listing was cut short: read, but not all of it.
+  const incomplete: string[] = [];
   for (const [account, ids] of byAccount) {
     const output = await runOnMac({
       argv: ["plow-gog", "calendar", "events", "--calendars", ids.join(","), "--account", account,
@@ -141,11 +144,12 @@ export async function listEvents(
       events.push(...listing.events.map((e) => ({ ...e, account })));
       // Part of the listing could not be read: the account is not fully searched.
       if (listing.degraded.length > 0) degraded.push(account);
+      else if (listing.after || listing.events.length >= FETCH_MAX) incomplete.push(account);
     } catch {
       degraded.push(account);
     }
   }
-  return { events, degraded };
+  return { events, degraded, incomplete };
 }
 
 export async function fetchBusy(
