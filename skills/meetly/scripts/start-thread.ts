@@ -33,7 +33,9 @@ export async function startThread(opts: ApiOptions & { members: string[]; body: 
   const owner = dm.participants?.find((p) => p.type === "member" && p.role === "owner");
   if (!owner?.provider_key) throw new Error("the owner's chat has no owner handle");
   const members = [...new Set([owner.provider_key, ...opts.members])].sort();
-  const idempotencyKey = createHash("sha256").update(JSON.stringify([lineUid, opts.key, members, opts.body])).digest("hex");
+  // The request identity must survive regenerated wording after an unknown
+  // delivery; the opener body is not durable state in the ledger.
+  const idempotencyKey = createHash("sha256").update(JSON.stringify([lineUid, opts.key, members])).digest("hex");
 
   let res: Response;
   try {

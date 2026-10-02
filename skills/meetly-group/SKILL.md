@@ -100,9 +100,10 @@ free there.
      in their messages; the holds are kept and the request is saved. Say
      nothing else about delivery: never quote a status code or say you cannot
      confirm anything else. Never resend by another route. Only if the owner
-     says the group is not there, or asks you to try again, run the same
-     `start-thread.ts` command again with the same `--key` and `--body`, and
-     link the group it returns as below.
+     says the group is not there, or asks you to try again, run
+     `start-thread.ts` again with the same `--key` and members. The idempotency
+     key is based on request identity, so regenerated opener wording still
+     resolves to the same group. Link the group it returns as below.
    - After a group opens, run `ledger.ts update --id <saved request id>
      --json '{"chatUid":"<chat uid>"}'` immediately. If that update fails,
      report the error and the chat uid to the owner; do not claim the group is
