@@ -11,10 +11,13 @@ argument arrays. Use `plow-gog` exactly as that skill says. Where this skill's
 flags differ from `checks/spike.md` §4, the spike wins.
 
 Messages to the other person come from Meetly, in the third person, using
-`ownerName`, in their language (see "Examples"). Send in the current
-conversation, or to another chat with `message` (action `send`, channel
-`plow`, accountId `chat`, target the chat uid). To message the owner, get
-their chat uid from `owner-chat.ts`.
+`ownerName`, in their language (see "Examples"). Reply in the current
+conversation with `message` (action `send`, omit target) or a normal final reply.
+The owner is in every meeting thread: confirmations, notifications and
+approval asks go there once, where the guest receives them too. From the
+owner's main DM, a follow-up to a known meeting thread uses `plow_reply_to`.
+An unattended poll has no current conversation and uses `message` with the
+known meeting chat uid as its target.
 
 ## Read the calendar
 
@@ -87,19 +90,19 @@ free there.
      never fall back to `plow_start_thread` and never edit a script. Delete
      the new holds and mark the saved request `dropped`; if a hold cannot be
      deleted, record its id and account in `holdCleanup` so cleanup can retry.
-   - A group the owner opened as a normal (untrusted) chat cannot run
-     Meetly: every guest reply there can only be passed to the owner. When
-     the owner asks Meetly to handle such a group, ask them to make it
-     trusted and, on their yes, run `plow_set_thread_trust` with that chat uid
-     and `trusted: true`.
+   - In a normal (untrusted) chat, guest turns are reply-only: do not run
+     scripts or use the owner's calendar. Explain in the thread that the
+     owner must approve there. If full guest tools are needed, the owner
+     must ask in their main DM to make the group trusted; only there can
+     `plow_set_thread_trust` change the group's trust.
    - If delivery is unknown (`deliveryUnknown`), continue without `chatUid`
      and tell the owner. Never resend.
    - After a group opens, run `ledger.ts update --id <saved request id>
      --json '{"chatUid":"<chat uid>"}'` immediately. If that update fails,
      report the error and the chat uid to the owner; do not claim the group is
      linked.
-7. Inbound requests: tell the owner in one line who, the topic and the held
-   times.
+7. The group opener also notifies the owner of who, the topic and the held
+   times; do not send a separate DM.
 
 ## Owner request
 
@@ -153,8 +156,8 @@ lunch with Ana", "remove all my appointments today", "move the call to 3pm"):
      owner exactly which steps are left and for which meeting. A deleted
      event left `booked` gets no reminder: `reminder-check.ts` reads the
      live event and sees it cancelled.
-4. Then tell them in their group (the request's `chatUid`), in one line, in
-   their language and in the third person: the owner cancelled (or moved)
+4. Then tell them in their group (the request's `chatUid`) with
+   `plow_reply_to`, in one line, in their language and in the third person: the owner cancelled (or moved)
    the meeting, its day and time, and for a move the new time. Give no
    reason unless the owner gave one to pass on. A Google cancellation email
    is not a message from Meetly: the group message is always sent. With no
@@ -232,14 +235,16 @@ owner's days or window:
 4. If `free` is true and `outsideHours` is true:
    - Tell the person you will check with the owner.
    - Run `ledger.ts update --id <id> --json '{"pendingOwner":{"start":"<slot.start>","end":"<slot.end>","askedAt":"<now ISO>"}}'`.
-   - Ask the owner in their DM, in one line: "<name> can only do <label>,
+   - Ask the owner in this thread, in one line: "<name> can only do <label>,
      outside your hours. Book it?"
    - End the turn. Hold nothing and book nothing until the owner says yes.
 
 ## Owner confirms
 
-When the owner answers a request listed by `ledger.ts pending` (in their DM,
-or in the group):
+When the owner answers a request listed by `ledger.ts pending` in that
+request's meeting thread, verify its `chatUid` is this chat before acting.
+A yes in the owner's DM does not approve the request: point them back to
+the meeting thread to answer there, and make no calendar changes.
 
 - **Yes:**
   1. Re-check with `slots.ts --at <pendingOwner.start>`.
@@ -248,8 +253,8 @@ or in the group):
      event". That records the booking and clears `pendingOwner`.
   3. Delete all the request's holds.
   4. If the format is still `unknown`, ask it in the group, once.
-  5. Confirm in the group, and to the owner in one line.
-  6. If it is no longer free, tell the owner and the group, and offer new
+  5. Confirm once in the group for both the owner and guest.
+  6. If it is no longer free, explain in the group, and offer new
      times.
 - **No:** clear it with `{"pendingOwner":null}`. Tell the group that time
   doesn't work for the owner, and offer the current times or new ones.
@@ -291,8 +296,8 @@ offer.
   not infer which meeting or time the message refers to, and do not ask a
   generic confirmation question. Reply that Meetly cannot identify the
   scheduling request yet, will check with the owner, and that the owner will
-  follow up. Then tell the owner in their DM that this chat has no linked
-  ledger request and include the chat uid; do not access calendar details or
+  follow up. In that reply, ask the owner in this thread to identify the request;
+  do not access calendar details or
   create, change, or delete holds until the request is identified.
 - **Pick** (a time, or "the first one works"):
   1. Re-run both `ledger.ts find --chat <this chat uid>` and
@@ -315,7 +320,7 @@ offer.
      be posted here 10 minutes before. Do not paste the link now. For
      `in_person`: the place. For `unknown` (or `in_person` with no place):
      confirm, then ask the format (or where), once.
-  4. Tell the owner in one line, with the format. Say "format not confirmed
+  4. The group confirmation also notifies the owner. Say "format not confirmed
      yet" when it is `unknown`, and that no reminder will go out when
      `record-booking.ts` warned `no-meet-link`.
 - **Another day or time:** delete the current holds. Run `slots.ts` narrowed
@@ -334,18 +339,18 @@ offer.
 - **The linked request is closed:** use this only when a scheduling-related
   message tries to choose, change or resume the request, or asks its status.
   For `booked`, say the meeting is already scheduled and that changes must go
-  through the owner; then tell the owner. One exception, **the format answer
+  through the owner in this thread. One exception, **the format answer
   after booking**: when a booked request's `format` is `unknown` (or
   `in_person` with no `location`) and the message answers how or where to
   meet, record it ("Meeting format"), then run `plow-gog calendar update
   primary <eventId> --account <booked.account>` following "Book the event"
-  (`--with-meet` or `--location`), confirm in the group in one line, and
-  tell the owner. Any other change to a booked meeting (time, day,
+  (`--with-meet` or `--location`), confirm in the group in one line.
+  Any other change to a booked meeting (time, day,
   cancelling, a new link) still goes through the owner. For `dropped`, say the request was
-  given up and the owner will follow up; then tell the owner. For `expired`,
-  say the offer expired and the owner will follow up; then tell the owner. For
-  `cancelled`, say the owner cancelled that meeting and will follow up if
-  there is a new time; then tell the owner. Do
+  given up and ask the owner to follow up here. For `expired`,
+  say the offer expired and ask the owner to follow up here. For `cancelled`,
+  say the owner cancelled that meeting and ask the owner to follow up here if
+  there is a new time. Do
   not run the no-match fallback for a closed request.
 - **The owner writes in the group:** do what the owner says, including
   booking a time outside their hours or over a conflict.

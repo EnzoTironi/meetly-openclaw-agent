@@ -2,7 +2,7 @@
 
 Your scheduling assistant, on a text thread. When someone asks to meet you,
 Meetly opens a group with them, offers your free times, holds them on your
-calendar and books the one they pick. You hear about it afterwards.
+calendar and books the one they pick. You receive the confirmation in the same group.
 
 An [OpenClaw](https://github.com/openclaw/openclaw) agent on
 [Plow Chat](https://howto.plow.co/). It is one person's assistant: your days,
@@ -27,7 +27,7 @@ up with you — "coffee next week?" — it:
 5. books the one they pick, invites them if it knows their email, and
    releases the other holds; for a Meet it creates the room,
 6. posts the Meet link in the group 10 minutes before the start,
-7. tells you in your DM what it did.
+7. confirms in the group, where both you and the other person receive it.
 
 It does not wait for you. If you are busy, the meeting still gets booked.
 
@@ -54,8 +54,8 @@ signed as Meetly.
 - **Offers only free time, inside your hours.** Your calendar shows up as free
   slots within the days and hours you set. Anything else is "an existing
   commitment" — never an event name or detail. If the other person can only
-  do a time outside your hours, Meetly asks you first and books it only on
-  your yes.
+  do a time outside your hours, Meetly asks you in that group and books it only on
+  your yes there. A yes in your DM does not approve the group request.
 - **Holds expire.** No answer in 48 hours: the holds are deleted and the
   group is told the times were released.
 - **Tells them when you cancel or move.** Ask Meetly to cancel or move a
@@ -116,21 +116,9 @@ plow-agents revoke           # retire the line in plow-credentials
 
 `plow-credentials` is gitignored. Do not commit it.
 
-**Apple Silicon.** The base image is published for `linux/amd64` only, and
-Docker's emulation on Apple Silicon lacks the `openat2` syscall OpenClaw
-2026.9.6 needs: the gateway exits with code 78 ("the Gateway or another SQLite
-maintenance command owns this state directory"). Build the base natively from
-source once, then add the arm64 override:
-
-```sh
-./dev/build-base.sh                                          # tags plow-openclaw-base:771198a-local
-docker compose -f compose.yml -f compose.arm64.yml up --build -d
-```
-
-Images you deploy are unaffected: the Dockerfile's default `BASE_IMAGE` is the
-published base, pinned by digest. On a native arm64 build the Agent Index usage
-reporter cannot run (the base ships `agentsview` for amd64 only); the agent
-itself works.
+**Apple Silicon.** The pinned base supports both `linux/amd64` and
+`linux/arm64`, including the native Agent Index usage collector. Compose
+uses your machine's architecture; no override or source-built base is needed.
 
 ## Deploy (cloud)
 
@@ -184,12 +172,11 @@ message is skipped.
   volume and survives restarts and rebuilds.
 - **Chat.** Your phone DM is the main session and runs setup. A group Meetly
   opened is recognized from its ledger and handled as that one meeting.
-- **Opening groups.** Turns started by a Plow message (your DM, a group) use
-  the base's `plow_start_thread`. The scheduled check has no inbound message,
-  and the base tool refuses to start a thread there, so the poll uses
-  `start-thread.ts`, which makes the same `POST /v1/chats` call (owner plus
-  the phone, trusted, idempotency key). If the result is uncertain, it records
-  the request without a chat and never sends twice. See `checks/spike.md`.
+- **Opening groups.** Meetly uses `start-thread.ts` for owner requests and
+  the scheduled poll. It calls `POST /v1/chats` with the owner plus the
+  contact, trusted, and an idempotency key. An uncertain delivery is
+  recorded without a chat and never resent. Meeting confirmations and
+  approval asks stay in that group; the owner is a participant.
 - **Scripts.** Small TypeScript CLIs in `skills/meetly/scripts/`, run directly
   by the image's Node (`node <script>.ts`, no build): setup, the message
   cursor, the request ledger, busy/free-slot math in your time zone, cron
@@ -259,8 +246,7 @@ Meetly reads your messages, so use it on an install only you talk to.
   served from here).
 - `checks/` — `manual-scenarios.md` (end-to-end checklist) and `spike.md`
   (findings from the base code and the owner's Mac).
-- `Dockerfile`, `compose.yml`, `dev/Caddyfile` — the image and local stack;
-  `compose.arm64.yml` and `dev/build-base.sh` for Apple Silicon.
+- `Dockerfile`, `compose.yml`, `dev/Caddyfile` — the image and local stack.
 
 ## Development
 
@@ -281,9 +267,7 @@ Pick a newer `base-<sha>` tag and its digest from the
 [gallery](https://gallery.ecr.aws/e1h7x4a2/plow-cloud-agents) and update the
 `FROM` line in `Dockerfile`. Then:
 
-1. Copy that commit's `prompt/AGENTS.md` over `tests/fixtures/base-AGENTS.md`,
-   and update `REV`/`TAG` in `dev/build-base.sh` and the tag in
-   `compose.arm64.yml`.
+1. Copy that commit's `prompt/AGENTS.md` over `tests/fixtures/base-AGENTS.md`.
 2. Diff the new base prompt against the old fixture and carry any changed
    tool or authority rule into `prompt/AGENTS.md`; `tests/prompt.test.ts`
    fails on a rule the base rewords.
