@@ -58,7 +58,8 @@ free there.
 4. Hold each slot ("Holds"). Drop a slot whose hold is refused for a
    conflict. If none are left, tell the owner and stop.
 5. Persist the offer immediately after the holds exist, before sending or
-   opening a group. Run `ledger.ts save --json '<request>'` with every field:
+   opening a group. When the request already has a `chatUid`, first keep its
+   current `offered[]`: it is what the person last saw. Run `ledger.ts save --json '<request>'` with every field:
    `origin`, `handle` (the intended contact handle), `name`, `sourceRowid`,
    `chatUid` if already known, `topic`, `location`, `durationMin`,
    `constraints`, `allowOverlap`, `format` and `locale` (see "Meeting
@@ -74,8 +75,11 @@ free there.
      From the owner's main DM use `plow_reply_to` with that `chatUid` and the
      new times; in the poll use `message` with that chat uid as its target;
      in the group itself reply normally. Say the new times were sent only
-     after that send succeeded. If it fails, tell the owner the specific
-     error in one line and that the holds and the saved offer are kept;
+     after that send succeeded. If it fails, the person still has the old
+     times: make them current again with `ledger.ts update --id <id> --json
+     '{"offered":<the offered[] you kept>,"holdCleanup":[]}'`, then delete
+     the new holds ("Holds"; a delete that fails goes in `holdCleanup`). Tell
+     the owner the specific error in one line and that the old times stand;
      never say the request was updated or sent.
    - Otherwise open a group with the person's handle and the opener: run
      `start-thread.ts --member <handle> --body <opener> --key <key>`, with key
@@ -125,8 +129,10 @@ In the owner's DM:
 4. If `ledger.ts find --handle <handle>` has an open request, reuse its group
    ("Offer times" step 5).
 5. Follow "Offer times" with `origin: owner`.
-6. Reply to the owner in one line: the group opened, or for an existing group
-   the new times sent to that group, and the times held.
+6. Only after the group opened or the send succeeded, reply to the owner in
+   one line: the group opened, or for an existing group the new times sent to
+   that group, and the times held. If it failed, reply with the error from
+   "Offer times" step 6 instead.
 
 ## Meeting format
 
