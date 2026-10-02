@@ -51,6 +51,8 @@ export type Request = {
   offeredAt: string;
   // When it stopped being open (dropped, expired, ...), so later bookkeeping does not move it.
   closedAt?: string;
+  // When the owner was last reminded about this request, so a reminder goes out once per ask.
+  nudgedAt?: string;
   // What happened and was confirmed, dated, oldest first (the last LOG_MAX).
   log?: LogEntry[];
   createdAt: string;
@@ -64,7 +66,7 @@ const LOG_TEXT_MAX = 300;
 export type Ledger = { requests: Request[] };
 
 export type NewRequest = Omit<Request,
-  "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "booked" | "meetUrl" | "roomUrl" | "reminder" | "offeredAt" | "closedAt" | "log" | "createdAt" | "updatedAt">;
+  "id" | "status" | "eventId" | "holdCleanup" | "pendingOwner" | "booked" | "meetUrl" | "roomUrl" | "reminder" | "offeredAt" | "closedAt" | "nudgedAt" | "log" | "createdAt" | "updatedAt">;
 export type Patch = Partial<Pick<Request,
   "status" | "chatUid" | "eventId" | "offered" | "holdCleanup" | "name" | "location" | "allowOverlap" | "constraints" | "topic" | "format" | "locale">> & {
   pendingOwner?: PendingOwner | null;
@@ -72,6 +74,7 @@ export type Patch = Partial<Pick<Request,
   meetUrl?: string | null;
   roomUrl?: string | null;
   reminder?: Reminder | null;
+  nudgedAt?: string;
 };
 
 const STATUSES: readonly Status[] = ["offered", "booked", "dropped", "expired"];
@@ -79,7 +82,7 @@ const FORMATS: readonly Format[] = ["meet", "in_person", "phone", "unknown"];
 const OUTCOMES: readonly Reminder["outcome"][] = ["sent", "cancelled", "no-link"];
 const PATCH_KEYS = [
   "status", "chatUid", "eventId", "offered", "holdCleanup", "name", "location", "allowOverlap", "constraints", "topic", "pendingOwner",
-  "format", "locale", "booked", "meetUrl", "roomUrl", "reminder",
+  "format", "locale", "booked", "meetUrl", "roomUrl", "reminder", "nudgedAt",
 ];
 // Keys a patch can clear with null.
 const NULLABLE = ["pendingOwner", "booked", "meetUrl", "roomUrl", "reminder"] as const;
@@ -174,7 +177,7 @@ export function addRequest(ledger: Ledger, input: NewRequest, now: number, id: s
   const at = new Date(now).toISOString();
   // A new offer is never booked: a booking, its link and its reminder are
   // only ever set through update, where they are validated.
-  const { booked: _b, meetUrl: _m, roomUrl: _z, reminder: _r, closedAt: _c, log: _l, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "roomUrl" | "reminder" | "closedAt" | "log">>;
+  const { booked: _b, meetUrl: _m, roomUrl: _z, reminder: _r, closedAt: _c, nudgedAt: _n, log: _l, ...fields } = input as NewRequest & Partial<Pick<Request, "booked" | "meetUrl" | "roomUrl" | "reminder" | "closedAt" | "nudgedAt" | "log">>;
   const request: Request = { ...fields, format, id, status: "offered", offeredAt: at, createdAt: at, updatedAt: at };
   return { requests: [...ledger.requests, request] };
 }
@@ -226,6 +229,7 @@ export function updateRequest(ledger: Ledger, id: string, patch: Patch, now: num
   if (patch.locale !== undefined) checkLocale(patch.locale);
   if (patch.booked) checkBooked(patch.booked);
   if (patch.reminder) checkReminder(patch.reminder);
+  if (patch.nudgedAt !== undefined && !isDate(patch.nudgedAt)) throw new Error(`nudgedAt must be a time, got ${JSON.stringify(patch.nudgedAt)}`);
   if (patch.meetUrl !== undefined && patch.meetUrl !== null && !isMeetUrl(patch.meetUrl)) {
     throw new Error(`meetUrl must be a Google Meet link (https://meet.google.com/xxx-xxxx-xxx), got ${JSON.stringify(patch.meetUrl)}`);
   }
@@ -367,6 +371,32 @@ export function pipeline(ledger: Ledger, now: number): {
   };
 }
 
+export const OWNER_NUDGE_HOURS = 4;
+export const UNDELIVERED_NUDGE_HOURS = 1;
+
+// What waits on the owner or on Meetly for too long, to be reminded once per
+// ask (a request's nudgedAt older than its ask makes it due again). What
+// waits on the other person is never nudged: the offer expires on its own.
+export function monitor(ledger: Ledger, now: number): {
+  ownerWaiting: (PipelineItem & { chatUid?: string })[]; undelivered: PipelineItem[];
+} {
+  const asked = (r: Request) => r.pendingOwner?.askedAt;
+  const due = (r: Request, since: string, hours: number) =>
+    hoursSince(since, now) >= hours && (!r.nudgedAt || Date.parse(r.nudgedAt) < Date.parse(since));
+  const view = (r: Request, since: string): PipelineItem => {
+    const stage = stageOf(r, now);
+    return { id: r.id, ...(r.name !== undefined ? { name: r.name } : {}), topic: r.topic, status: r.status, stage, nextStep: NEXT_STEP[stage], hoursWaiting: hoursSince(since, now) };
+  };
+  const open = ledger.requests.filter((r) => r.status === "offered");
+  return {
+    ownerWaiting: open.filter((r) => stageOf(r, now) === "waiting_on_us" && asked(r) && due(r, asked(r)!, OWNER_NUDGE_HOURS))
+      .map((r) => ({ ...view(r, asked(r)!), ...(r.chatUid !== undefined ? { chatUid: r.chatUid } : {}) }))
+      .sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
+    undelivered: open.filter((r) => stageOf(r, now) === "held" && due(r, r.offeredAt, UNDELIVERED_NUDGE_HOURS))
+      .map((r) => view(r, r.offeredAt)).sort((a, b) => b.hoursWaiting! - a.hoursWaiting!),
+  };
+}
+
 // Everything the ledger holds for one person, newest first: what the meeting
 // was for, how it was to happen, where, for how long.
 export function historyFor(ledger: Ledger, handle: string): Pick<Request, "id" | "status" | "name" | "topic" | "format" | "location" | "durationMin" | "createdAt">[] {
@@ -443,6 +473,8 @@ if (isMain(import.meta.url)) {
         const ledger = updateJson<Ledger>(path, EMPTY, (l) => appendLog(l, values.id!, values.text!, now));
         return { log: ledger.requests.find((r) => r.id === values.id)!.log };
       }
+      case "monitor":
+        return monitor(readJson<Ledger>(path, EMPTY), now);
       case "pipeline":
         return pipeline(readJson<Ledger>(path, EMPTY), now);
       case "history": {
@@ -459,7 +491,7 @@ if (isMain(import.meta.url)) {
         return { requests: dueReminders(readJson<Ledger>(path, EMPTY), now, lead) };
       }
       default:
-        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | pipeline | history | log | cleanup | reminders");
+        throw new Error("usage: ledger.ts find | add | save | update | expired | pending | pipeline | monitor | history | log | cleanup | reminders");
     }
   });
 }
