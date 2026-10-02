@@ -81,4 +81,5 @@ to install anything else.
   request does not say.
 - "Pause Meetly" → `register-crons.ts --pause`. "Resume" → `register-crons.ts --resume`.
 - "Status" → summarize `setup-status.ts`: days, window, duration, horizon,
-  calendars, and whether it is paused.
+  default meeting type (or "ask each time" when `config.defaultFormat` is
+  unset), calendars, and whether it is paused.
