@@ -5,9 +5,12 @@
 // thread requires an active message") and gives Plow only 10 s: a slower
 // Plow there reads as an unknown delivery that withholds the rest of the turn.
 //
-// A server error or a lost connection may still have created the group, so
-// it reports { chatUid: null, deliveryUnknown: true } rather than failing:
-// the caller records the request without a chat uid and never resends.
+// A server error or a lost connection may still have created the group. The
+// idempotency key makes a second post safe: it finds that group instead of
+// opening another, so an unknown delivery is tried once more before it is
+// reported as { chatUid: null, deliveryUnknown: true } rather than failing.
+// The caller then records the request without a chat uid and never resends
+// by any other route.
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { isMain, run } from "./cli.ts";
@@ -16,7 +19,7 @@ import { isHandle } from "./reachable-handle.ts";
 
 export type Started = { chatUid: string; messageSent: true } | { chatUid: null; deliveryUnknown: true };
 
-export async function startThread(opts: ApiOptions & { members: string[]; body: string; key: string }): Promise<Started> {
+export async function startThread(opts: ApiOptions & { members: string[]; body: string; key: string; retryDelayMs?: number }): Promise<Started> {
   if (opts.members.length === 0) throw new Error("give at least one phone number");
   // A phone in E.164 or an iMessage email: reachable-handle.ts says which one.
   for (const m of opts.members) {
@@ -35,24 +38,32 @@ export async function startThread(opts: ApiOptions & { members: string[]; body: 
   const members = [...new Set([owner.provider_key, ...opts.members])].sort();
   const idempotencyKey = createHash("sha256").update(JSON.stringify([lineUid, opts.key, members, opts.body])).digest("hex");
 
-  let res: Response;
-  try {
-    res = await api.fetch(`${api.base}/v1/chats`, {
-      method: "POST",
-      headers: { ...api.headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ line_uid: lineUid, members, body: opts.body, trusted: true, idempotency_key: idempotencyKey }),
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch {
-    return { chatUid: null, deliveryUnknown: true };
-  }
-  // Same rule as the plugin: 408, 424 and 5xx may have gone through.
-  if ([408, 424].includes(res.status) || res.status >= 500) return { chatUid: null, deliveryUnknown: true };
-  if (!res.ok) throw new Error(`POST /v1/chats returned HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const chat = (await res.json()) as { uid?: string };
-  if (!chat.uid) return { chatUid: null, deliveryUnknown: true };
-  return { chatUid: chat.uid, messageSent: true };
+  const post = async (): Promise<Started> => {
+    let res: Response;
+    try {
+      res = await api.fetch(`${api.base}/v1/chats`, {
+        method: "POST",
+        headers: { ...api.headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ line_uid: lineUid, members, body: opts.body, trusted: true, idempotency_key: idempotencyKey }),
+        redirect: "error",
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      return { chatUid: null, deliveryUnknown: true };
+    }
+    // Same rule as the plugin: 408, 424 and 5xx may have gone through.
+    if ([408, 424].includes(res.status) || res.status >= 500) return { chatUid: null, deliveryUnknown: true };
+    if (!res.ok) throw new Error(`POST /v1/chats returned HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const chat = (await res.json()) as { uid?: string };
+    if (!chat.uid) return { chatUid: null, deliveryUnknown: true };
+    return { chatUid: chat.uid, messageSent: true };
+  };
+
+  const first = await post();
+  if (first.chatUid !== null) return first;
+  await new Promise((resolve) => setTimeout(resolve, opts.retryDelayMs ?? 2_000));
+  // Whatever the retry gets other than the group, the delivery stays unknown.
+  return post().catch((): Started => ({ chatUid: null, deliveryUnknown: true }));
 }
 
 if (isMain(import.meta.url)) {

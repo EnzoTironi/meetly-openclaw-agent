@@ -94,8 +94,17 @@ free there.
      owner must approve there. If full guest tools are needed, the owner
      must ask in their main DM to make the group trusted; only there can
      `plow_set_thread_trust` change the group's trust.
-   - If delivery is unknown (`deliveryUnknown`), continue without `chatUid`
-     and tell the owner. Never resend.
+   - If delivery is unknown (`deliveryUnknown`), `start-thread.ts` already
+     tries twice with the same key, so a second group cannot open. Continue
+     without `chatUid` and tell the owner in one plain line, in their
+     language: you started the group with <name> and Plow did not confirm it,
+     so they should look for it in their messages; the holds are kept and the
+     request is saved. Say nothing else about delivery: never quote a status
+     code or say you cannot confirm anything else. Never resend by another
+     route. If the owner says the group is not there, or asks you to try
+     again, run the same `start-thread.ts` command again with the same `--key`
+     and `--body`: it returns the group if it was opened, and link it as
+     below.
    - After a group opens, run `ledger.ts update --id <saved request id>
      --json '{"chatUid":"<chat uid>"}'` immediately. If that update fails,
      report the error and the chat uid to the owner; do not claim the group is
