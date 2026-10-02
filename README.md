@@ -82,7 +82,8 @@ Everything else starts at these defaults:
 - days: Monday to Friday,
 - hours: 09:00 to 18:00,
 - meeting length: 30 minutes,
-- offers up to 14 days ahead.
+- offers up to 14 days ahead,
+- times at least 2 hours ahead (same-day times count once they clear it).
 
 Change any of it later in plain words ("make my window 10 to 17", "I don't
 take meetings on Fridays"), or say "pause Meetly" / "resume Meetly".
