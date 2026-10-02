@@ -37,6 +37,9 @@ free there.
    with `contacts`: name and every phone (E.164) and email; then run
    `reachable-handle.ts --handle <each phone and email>` and use the `handle`
    it returns: the one the owner reaches them on over iMessage.
+   - If the contact has a phone but no email, say so in your reply to the
+     owner: the calendar invitation needs one, and without it the
+     confirmation goes to the group only. They can send an email now.
    - `reason: "not-on-imessage"`: tell the owner in one line that <name> is
      not on iMessage at any of their numbers or emails, so Meetly cannot reach
      them, then stop.
@@ -85,6 +88,10 @@ free there.
      like to meet: Google Meet or in person. When it is `in_person` with no
      `location`, it asks where. Always in that one message, never a second
      one.
+   - When the format is `meet` and neither a contact card nor the thread gives
+     the person's email, the same opener also asks for it, for the calendar
+     invitation. Search contacts and the thread first; never ask for what you
+     can find.
    - If `start-thread.ts` fails, tell the owner what it printed and stop:
      never fall back to `plow_start_thread` and never edit a script. Delete
      the new holds and mark the saved request `dropped`; if a hold cannot be
@@ -158,6 +165,10 @@ held slot, or `calendar create primary`), always with `--json` and
 - `phone`: `--location "Phone call"`.
 - `unknown`: nothing extra.
 
+Add the person's email, from contacts or the one they gave, as an attendee
+on every booking, so the calendar invitation goes out with `--send-updates
+all`.
+
 Then:
 
 1. Save the command's whole output with the `write` tool to
@@ -171,6 +182,15 @@ Then:
    link, so no reminder will go out. Tell the owner in the booking line.
    Never paste, invent or accept a link from anyone. The only link Meetly
    ever posts is the one `record-booking.ts` or `reminder-check.ts` prints.
+4. When you confirm in the group, state three things apart: the event is on
+   the owner's calendar, this message is the confirmation, and the calendar
+   invitation either went to that email or was not sent because there is no
+   email; when there is none, ask for it once. An invitation that is pending
+   is not an acceptance: never say the person accepted.
+5. When the person gives their email after the booking, add it as an
+   attendee with `plow-gog calendar update primary <eventId> --account
+   <booked.account>` and `--send-updates all` (following the Mac's
+   `google-workspace` skill), then say the invitation was sent.
 
 ## Outside the owner's hours
 
