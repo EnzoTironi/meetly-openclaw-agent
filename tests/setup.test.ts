@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULTS, REQUIRED_FIELDS, holdHours, parseField, parseTime, readableCalendars, validateConfig, type Config } from "../skills/meetly/scripts/config.ts";
+import { DEFAULTS, REQUIRED_FIELDS, holdHours, loadConfig, parseField, parseTime, readableCalendars, validateConfig, type Config } from "../skills/meetly/scripts/config.ts";
 import { finish, record } from "../skills/meetly/scripts/record-setup.ts";
 import { status, statusFilling } from "../skills/meetly/scripts/setup-status.ts";
 import { readJson } from "../skills/meetly/scripts/store.ts";
@@ -52,6 +52,7 @@ test("saved configurations without ownerGate require approval", () => {
     const s = status();
     assert.equal(s.status, "READY");
     assert.equal(s.config.ownerGate, true);
+    assert.equal(loadConfig().ownerGate, true);
   });
 });
 
