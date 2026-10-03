@@ -6,13 +6,13 @@
 # each, or the sibling reports as `missing` and is never searched.
 #
 # Each row is a real edge. `plow-openclaw-agent` is the base the Dockerfile
-# builds FROM by digest, and `boot/` mirrors its boot step for step. `latch`
+# builds FROM by digest and owns bootstrap, auth and the channel. `latch`
 # owns the MCP tools and the gog grammar that every calendar, contact and
 # iMessage read and write goes through. `plow-agents` owns the install
 # contract the README follows.
 #
 # `agent-index-client` stays out: it reaches this repo only through the base.
-# `plow-pbc/plow` stays out although the scripts call its API: it is private
+# `plow-pbc/plow` stays out although the native provider reads its API: it is private
 # and this repo is public, so a citation into it would publish private paths.
 
 plow-pbc/plow-openclaw-agent

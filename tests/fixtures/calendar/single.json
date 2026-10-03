@@ -1,8 +1,0 @@
-{
-  "events": [
-    { "id": "g1", "summary": "Lunch", "status": "confirmed", "start": { "dateTime": "2026-09-29T15:00:00Z" }, "end": { "dateTime": "2026-09-29T16:00:00Z" } },
-    { "id": "g2", "summary": "Cancelled", "status": "cancelled", "start": { "dateTime": "2026-09-29T17:00:00Z" }, "end": { "dateTime": "2026-09-29T18:00:00Z" } },
-    { "id": "g3", "summary": "Said no", "start": { "dateTime": "2026-09-29T19:00:00Z" }, "end": { "dateTime": "2026-09-29T20:00:00Z" }, "attendees": [{ "email": "owner@example.com", "self": true, "responseStatus": "declined" }] },
-    { "id": "g4", "summary": "Vacation", "start": { "date": "2026-10-05" }, "end": { "date": "2026-10-08" } }
-  ]
-}

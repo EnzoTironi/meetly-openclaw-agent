@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "openclaw": { "extensions": ["./src/extension.ts"] },
   "engines": {
     "node": ">=24.16"
   },
@@ -13,5 +14,8 @@
   "devDependencies": {
     "@types/node": "26.6.2",
     "typescript": "6.0.3"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
   }
 }
