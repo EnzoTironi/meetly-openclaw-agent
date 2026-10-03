@@ -10,7 +10,14 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["boot/**/*.ts", "skills/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "boot/**/*.ts",
+    "skills/**/*.ts",
+    "tests/**/*.ts",
+    "src/**/*.ts"
+  ]
 }
