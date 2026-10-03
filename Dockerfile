@@ -1,27 +1,21 @@
-# Meetly: a scheduling variant of Plow's OpenClaw base image.
-# Pinned by digest: the base boots holding this agent's Plow credential.
-# To bump, take a newer base-<sha> tag and its digest from
-# https://gallery.ecr.aws/e1h7x4a2/plow-cloud-agents
-FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-fba9c7ebba9a2623a56c6aba67993fc5cf8c1337@sha256:41b4b99f86d4cbdd554962b0b3fb1f014d0590a00688b57737209657589931ce
+# Plow owns boot, iMessage, Latch, model authentication and the Index client.
+FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-cc708dd8534f9c7686be4223713570c16e5ad006@sha256:1cf8e57ec949f8077329927da47df4215620605cdd987bbd4bb36eaa5147da06
 
-# Every Meetly group is trusted: a guest's reply must reach the ledger and
-# calendar scripts; untrusted guests get replies only. The
-# base's default ("ask") would also have the model ask the owner which kind
-# of group to open. AGENTS.md limits what a guest can have done.
-ENV AGENT_ID=meetly \
-    AGENT_NAME=Meetly \
-    AGENT_BLURB="Your scheduling assistant. It reads your iMessages, spots who wants to meet, and opens a group to book it on your calendar. Or ask it to reach out to anyone for you. Works both ways." \
-    AGENT_RUNTIME="OpenClaw 2.0" \
-    PLOW_THREAD_TRUST=trusted
+USER root
+# Native extension installation and delivery helpers, proposed upstream.
+# Remove this pinned patch when a published Plow base includes the commit.
+ADD --checksum=sha256:e0ec1e53130ab30ccde3fe04aa9ef4ea272e2e7e8b0c8df9427ee2e451ef6a36 https://github.com/EnzoTironi/zoen-plow/commit/596954a68a4a593fd6380eafcdac471c89eca9cc.patch /tmp/plow-native.patch
+RUN git -C /opt/plow apply --include='boot/*.ts' --include='plugin/*.ts' --include='build.ts' /tmp/plow-native.patch \
+    && node /opt/plow/build.ts && rm /tmp/plow-native.patch
 
+COPY package.json package-lock.json openclaw.plugin.json /opt/meetly/
+COPY src/ /opt/meetly/src/
+RUN cd /opt/meetly && npm ci --omit=dev --ignore-scripts
+COPY agent.json /opt/plow/agent.json
 COPY prompt/AGENTS.md /opt/plow/prompt/AGENTS.md
 COPY skills/ /opt/plow/skills/
 
-# Meetly's entrypoint: the base's boot step for step, plus the model (Plow's
-# Luna by default, the owner's own OpenAI account after `plow-llm openai`),
-# the setup gate plugin and the Mac relay's request timeout.
-COPY boot/ /opt/meetly/boot/
-COPY plugin/ /opt/meetly/plugin/
-COPY boot/plow-llm.sh /usr/local/bin/plow-llm
-
-CMD ["node", "/opt/meetly/boot/preboot.ts"]
+# Private local installs do not register or report to the public leaderboard.
+# Set AGENT_ID explicitly only when the owner chooses to publish a listing.
+ENV AGENT_ID="" PLOW_THREAD_TRUST=untrusted
+USER node

@@ -1,13 +1,9 @@
 name: Publish image
 
 # Builds and pushes Meetly's image to GHCR with the repository's own
-# GITHUB_TOKEN. Publishing is automatic; promoting a digest to Plow's
-# one-click deploy stays a manual step for the owner (see the run summary).
+# GITHUB_TOKEN. Publishing requires an explicit dispatch.
 
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -20,8 +16,6 @@ concurrency:
 
 env:
   PACKAGE_NAME: meetly-openclaw-agent
-  # Admitted slug, confirmed with `plow-agents image show meetly`.
-  PLOW_SLUG: meetly
 
 jobs:
   publish:
@@ -46,7 +40,7 @@ jobs:
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # The published base image is linux/amd64 only, and so is Plow.
+      # Plow cloud deployment uses linux/amd64; local builds also support arm64.
       - id: build
         uses: docker/build-push-action@v6
         with:
@@ -77,11 +71,5 @@ jobs:
             echo
             echo '```'
             echo "${TAGS}"
-            echo '```'
-            echo
-            echo "## Promote to Plow (manual)"
-            echo
-            echo '```sh'
-            echo "plow-agents image promote ${PLOW_SLUG} ${ref}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

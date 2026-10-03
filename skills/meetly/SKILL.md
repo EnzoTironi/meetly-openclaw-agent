@@ -1,56 +1,48 @@
 ---
 name: meetly
-description: Reference for Meetly's scripts (state, calendar math, cron, Plow calls). Read it when a meetly-* skill names a script.
+description: Research, hold, approve, publish and book meetings through Meetly's verified native workflow.
 ---
-# Meetly scripts
+# Scheduling workflow
 
-Run each as `node /opt/plow/skills/meetly/scripts/<name>.ts` with `exec`.
-Success prints one JSON line. Failure prints `error: <message>` on stderr and
-exits non-zero: report that line; never guess a result. State lives in
-`/var/lib/plow/meetly/`.
+Call `meetly` with one action. Its results are confirmed observations; read
+errors and pending cleanup literally. Ordinary replies use the current Plow
+conversation. The workflow owns cross-conversation sends and calendar writes.
 
-| Script | Arguments | Prints |
-|---|---|---|
-| `setup-status.ts` | | `{status:"READY", config, range:{from,to}}` or `{status:"SETUP_NEEDED", next, question, draft}` |
-| `record-setup.ts` | `--field F --value V` \| `--done` | before setup `{saved, next, question}`; after `{saved, config}`; `--done` → `{done, config, crons}` |
-| `register-crons.ts` | `[--pause \| --resume]` | `{paused, actions}` |
-| `cursor.ts` | `get` \| `set <rowid>` \| `hold <rowid>` \| `release` \| `fail` \| `ok` | the cursor `{rowid, held?, …}`; `set` stops below `held` until the ledger has a request with that `sourceRowid`; `fail` → `{failingSince, warn}` |
-| `ledger.ts` | `find --handle H` \| `find --chat U` | `{request}` or `{request:null}` |
-| | `add --json '<obj>'` \| `--json-file F` | `{request}` (refused if the person already has an open request) |
-| | `save --json '<obj>'` \| `--json-file F` | `{request}` (creates, or replaces the current open offer for that handle while preserving its id and chat link) |
-| | `update --id X --json '<patch>'` | `{request}`; patch keys: `status, chatUid, eventId, offered, holdCleanup, name, location, allowOverlap, constraints, topic, pendingOwner, format, locale, booked, meetUrl, reminder` (`null` clears `pendingOwner`, `booked`, `meetUrl`, `reminder`) |
-| | `expired [--hours N]` \| `pending` \| `cleanup` | `{requests}` |
-| | `reminders [--lead-min N]` | `{requests}`: booked Meets whose link is due (default 10 min before, until 5 min after the start) |
-| `event.ts` | `--in F` | `{id, status, start, end, meetUrl}` from a saved `plow-gog calendar create/update/event --json` output |
-| `record-booking.ts` | `--id X --event-file F --account A` | `{request, meetUrl, warning?:"no-meet-link"}`: marks the request booked from the event |
-| `reminder-check.ts` | `--id X --event-file F [--lead-min N]` | `{action:"send"\|"wait"\|"cancelled"\|"no-link"\|"skip", send?:{chatUid, meetUrl, name, locale, time, minutesToStart}}` |
-| | `--id X --sent` | `{request}`: the reminder went out; refused if already handled |
-| `busy.ts` | `--fetch` (reads the Mac, writes `tmp/busy.json`) | `{file, busy:<count>, degraded, unknownAfter?}` |
-| | `--in F [--in F2…] [--max 100]` | `{busy:[{start,end,id,account}], unknownAfter?, degraded}` |
-| `slots.ts` | `--in busy.json [--duration N] [--days mon,thu] [--after HH:MM] [--before HH:MM] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--allow-overlap ID]… [--exclude ISO]… [--count N] [--locale TAG]` | `{slots:[{start,end,dayOfWeek,label}], unknownAfter?, degraded}` |
-| | `--in busy.json --at <ISO or YYYY-MM-DDTHH:MM in the owner's zone> [--duration N] [--allow-overlap ID]… [--locale TAG]` | `{slot, free, reason?: busy\|too-soon\|unknown, outsideHours, degraded}` |
-| `owner-chat.ts` | | `{chatUid}`: the owner's DM |
-| `start-thread.ts` | `--member <+E164 or email> [--member …] --body TEXT --key K` | `{chatUid, messageSent:true}` or `{chatUid:null, deliveryUnknown:true}` |
-| `contact.ts` | `--handle <+E164 or email>` | `{found:true, handle, name, phones, emails, matches}`, `{found:false, handle}` or `{found:false, handle, reason:"mac-unavailable"}` |
-| `reachable-handle.ts` | `--handle <+E164 or email> [--handle …]` | `{handle, via:"iMessage"}`, `{handle:null, reason:"not-on-imessage", services}` or `{handle:null, reason:"mac-unavailable"}` |
+| Action | Input and behavior |
+|---|---|
+| `status` | Read stored preferences, pipeline meetings, revisions and unfinished operations. With no preferences, includes discovered calendars and timezone. Private owner only. |
+| `remember` | `preferences`: owner name, timezone, write `calendar`, `busyCalendars`, `video`, durations, travel buffer, working hours, notice and monitor interval. Privately confirmed changes only. |
+| `research` | `query`: a name, phone or email. Searches relevant texts, email, Plow threads and contact pages. Read context before asking anything. |
+| `prepare` | `contact: {name, handle}`, `details`, `range: {from, to}`. Details include topic, attendee emails and `kind`: `video`, `in_person` with location, or `phone` with phone handle. Omitted duration uses the stored format duration. For an external Plow request, include its actual `source: {thread, messageId}`. Creates three verified held options and a private external approval gate. |
+| `ask` | `contact`, `question`, optional verified `source`. Records a private owner question for genuinely missing details. |
+| `approve` | `meetingId`, exact `revision`. Private owner only; records inbox approval, then publishes that proposal. |
+| `publish` | `meetingId`, `revision`. Sends held, authorized options and records the exact inbox receipt. A new group requires this active owner DM. Groups remain untrusted. |
+| `choose` | `meetingId`, current sent `revision`, `option` 1–3. Verifies the calendar invite before sibling cleanup and confirmation. |
+| `repropose` | `meetingId`, current `revision`, new `range`. Replaces rejected options, excluding their starts. External requests get a fresh private approval gate. |
+| `move` | `meetingId`, offset-aware `start`. Private owner only. Checks availability, preserves event/link and replaces travel. |
+| `cancel` | `meetingId`. Private owner only. Verifies deletion and releases recorded holds/travel. |
+| `reply` | `meetingId`, model-written `text`. Private owner only. Sends a natural answer in that meeting's verified, already authorized group and confirms its inbox receipt. |
+| `repair` | `meetingId`. Private owner only. Repairs the original event after an unverified booking. New Zoom requires the existing room URL; an uncertain room creation never creates another room. Optional `zoomUrl` must appear in the owner's current private message. |
+| `block` / `unblock` | Contact `handle`. Private owner only. Blocking closes its pipeline; no subsequent outreach is allowed. |
+| `reconcile` | Walk pending operations and every meeting. The native service also runs this at the stored interval. |
 
-Notes:
-- A request's `format` is `meet`, `in_person`, `phone` or `unknown`.
-  `meetUrl` only ever holds `https://meet.google.com/xxx-xxxx-xxx`, only on
-  a `meet`; the ledger refuses anything else.
-- Booking and reminders read the event from a file of plow-gog's own
-  output; never copy an event id, time or link by hand.
-- `slots.ts` only offers times inside the owner's days and window. Requests
-  only narrow them.
-- Use each slot's `label` and `dayOfWeek` as printed; never work out a
-  weekday yourself. Pass `--locale` for whoever reads the message (the other
-  person's locale, like `pt-BR` or `en-US`, from their language or their
-  phone's country code).
-- The line sends over iMessage only. A phone that is not on iMessage (an
-  Android, an RCS or SMS contact) gets nothing, and Plow still reports it as
-  sent. `reachable-handle.ts` asks the owner's Messages archive which of a
-  person's handles is on iMessage; use the handle it returns.
-- `start-thread.ts` opens every Meetly group, in the poll and for the owner.
-  It gives Plow 30 s and reports an unknown delivery without failing the
-  turn; the `plow_start_thread` tool gives it 10 s and, on a slow Plow,
-  withholds the turn's reply to the owner.
+Every date has a UTC offset; use the owner's stored timezone to interpret
+natural-language dates. `video` is `{kind:"google_meet"}`,
+`{kind:"zoom_personal",url:"https://zoom.us/my/…"}` or `{kind:"zoom_new"}`.
+There is no implicit video provider. New Zoom uses the owner's connected
+`plow-gog` Zoom account, not a separate Meetly credential store.
+
+Remember `movableTitles` only when the owner authorizes those exact titles.
+The planner first uses free time. If necessary it relocates listed blocks
+only on the owner's write calendar, with verified owner creation and without attendees or conference data,
+into verified free time. Other meetings and Meetly's active holds stay busy.
+Guests cannot supply an overlap or working-hours override.
+Omit `source` for the current owner request; its authenticated receipt is
+already supplied by Plow. Use `source` only to reference an actual inbox
+message returned by research. Never invent a message ID or use a placeholder.
+
+After `prepare`, inspect the returned state. Publish owner requests in the
+same turn. For `held` with required approval, keep all times private. For
+`waiting_on_us`, ask the recorded question privately. Use `status` to find
+the exact current meeting and revision after a reply or restart. Never use
+raw exec, calendar, messaging or file tools to bypass the workflow.

@@ -1,286 +1,122 @@
 # Meetly
 
-Your scheduling assistant, on a text thread. When someone asks to meet you,
-Meetly opens a group with them, offers your free times, holds them on your
-calendar and books the one they pick. You receive the confirmation in the same group.
+Meetly is a scheduling assistant you text through Plow. It researches the
+conversation, holds three options, gets private owner approval for external
+requests, and verifies the invitation before releasing the other holds.
+The LLM interprets the request and writes every message, including reminders.
+Meetly accepts requests in its own Plow conversations. It reads email and
+Mac texts to research those meetings; other conversations never trigger
+outreach or private questions.
 
-An [OpenClaw](https://github.com/openclaw/openclaw) agent on
-[Plow Chat](https://howto.plow.co/). It is one person's assistant: your days,
-your hours, your calendars, set once in a short chat.
+## Run privately on a local line
 
-> **Status:** implemented. The on-Mac checks (`checks/spike.md`) and the
-> end-to-end run (`checks/manual-scenarios.md`) are still to be done before
-> the first deploy.
-
-## What it is
-
-Every five minutes Meetly reads your new iMessages on your Mac, through
-[Latch](https://howto.plow.co/latch). When someone is trying to set something
-up with you — "coffee next week?" — it:
-
-1. opens a Plow group with you and that person,
-2. offers three free times from your Google Calendar, inside the days and
-   hours you allow,
-3. holds those times on your calendar so nothing else takes them,
-4. asks how you'll meet (Google Meet or in person) when the message does
-   not say it,
-5. books the one they pick, invites them if it knows their email, and
-   releases the other holds; for a Meet it creates the room,
-6. posts the Meet link in the group 10 minutes before the start,
-7. confirms in the group, where both you and the other person receive it.
-
-It does not wait for you. If you are busy, the meeting still gets booked.
-
-You can also ask it directly: *"set up lunch with Patrick next week — it can go
-over Weekly Claw"*. Meetly finds Patrick in your contacts, respects what you
-said for that one request, and runs the same group.
-
-Meetly always speaks as your assistant, in the third person: *"Jean is free Tue
-29/9 at 12:00"*, never *"I'm free"*. It never texts from your own Messages
-account; every conversation with the other person happens in the Plow group,
-signed as Meetly.
-
-## What it will and won't do
-
-- **Asks how to meet only when it is not clear.** "A Google Meet on
-  Thursday" or "lunch at Fasano" is enough. "A call" or "coffee" with no
-  place gets one question, in the same message as the times.
-- **Posts only the Meet link it created.** The link comes from the event on
-  your calendar, read again just before it is sent: move the meeting and the
-  link goes out at the new time; delete it and nothing is sent. A link
-  someone writes in the group is never used. Pausing Meetly pauses these
-  too.
-
-- **Offers only free time, inside your hours.** Your calendar shows up as free
-  slots within the days and hours you set. Anything else is "an existing
-  commitment" — never an event name or detail. If the other person can only
-  do a time outside your hours, Meetly asks you in that group and books it only on
-  your yes there. A yes in your DM does not approve the group request.
-- **Holds expire.** No answer in 48 hours: the holds are deleted and the
-  group is told the times were released.
-- **Overlaps only with your word.** Meetly books over an existing event only
-  when you named that event in your request (or said yes in the group). People
-  in the group can never unlock a conflict or a time outside your hours.
-- **Stays on topic in groups.** The group is for this one meeting. Meetly does
-  not read your mail, files or other conversations for the other person.
-- **Ignores instructions in messages.** A text that says "ignore your rules"
-  is just a text.
-- **Skips noise.** Verification codes, short codes, marketing and automated
-  senders never get a group. If you already answered the person yourself,
-  Meetly stays out of it.
-
-## Setup
-
-The first time you text the line, Meetly introduces itself in one line and
-gets to work on what you asked. It asks only what nobody else can tell it:
-your name and time zone, when your Plow profile and your Mac cannot supply
-them. Your busy calendars are read from the Mac: every calendar you show in
-Google Calendar counts.
-
-Everything else starts at these defaults:
-
-- days: Monday to Friday,
-- hours: 09:00 to 18:00,
-- meeting length: 30 minutes,
-- offers up to 14 days ahead.
-
-Change any of it later in plain words ("make my window 10 to 17", "I don't
-take meetings on Fridays"), or say "pause Meetly" / "resume Meetly".
-
-## Install (local)
-
-You need Git, Docker Compose, and
-[plow-agents](https://github.com/plow-pbc/plow-agents).
+Use the **Build on Plow** path. Install
+[plow-agents](https://github.com/plow-pbc/plow-agents), run Docker, and connect
+[Plow Latch](https://howto.plow.co/latch) on the Mac with your messages and
+calendar. Use the same Plow account for the CLI and Latch.
 
 ```sh
-git clone https://github.com/jeanjacintho/meetly-openclaw-agent.git
+git clone https://github.com/EnzoTironi/meetly-openclaw-agent.git
 cd meetly-openclaw-agent
-
-plow-agents login                 # text the printed code
-plow-agents lines                 # pick a free line
-plow-agents mint LINE_UID         # writes ./plow-credentials before the first up
-docker compose up --build -d
-docker compose logs -f agent      # wait for: plow-boot: identity resolved …
+plow-agents login
+plow-agents deploy --local --line YOUR_LINE_UID
 ```
 
-Text the line you minted; setup starts with your first message. By default,
-the local dashboard is at <http://localhost:3001> (anyone who can reach it is
-admin). Set `HOST_PORT` to bind another loopback port; the container listens
-on port 3001 either way.
+Text that line. Meetly discovers your calendars and timezone, then asks
+privately for preferences it cannot find. Save your video provider once:
+Google Meet, a personal Zoom room, or a new Zoom link per meeting. New Zoom
+links require a Zoom account connected to `plow-gog` through Latch.
+Durations, travel buffers, working hours and reminder settings are reused.
+
+The image has an empty `AGENT_ID`, so private tests do not register on the
+Agent Index or report usage. Keep it empty in `plow-credentials`. Publishing
+and registration are separate, explicit steps described by
+[Plow's deployment guide](https://github.com/plow-pbc/plow-agents).
+The image publication workflow runs only when manually dispatched.
+
+The local dashboard binds to `127.0.0.1:3001`; set `HOST_PORT` to change it.
+Use OpenClaw's native model settings and login. Your selected model and
+credentials persist across image restarts; Meetly has no separate auth or
+model router. Credentials belong in the ignored env file or native secret
+store, never in the contact wiki.
 
 ```sh
-docker compose down          # stop, keep settings, holds ledger and schedule
-docker compose down -v       # wipe the state volume (fresh setup)
-plow-agents revoke           # retire the line in plow-credentials
+docker compose logs -f agent
+docker compose up --build -d     # rebuild after a code change
+docker compose down              # stop while preserving the state volume
 ```
 
-`plow-credentials` is gitignored. Do not commit it.
+## Design
 
-**Apple Silicon.** The pinned base supports both `linux/amd64` and
-`linux/arm64`, including the native Agent Index usage collector. Compose
-uses your machine's architecture; no override or source-built base is needed.
+Plow owns delivery, phone lines, identities, the Mac bridge and model auth.
+OpenClaw runs the conversation and the native Meetly plugin. There is one
+skill, one scheduling tool and one periodic service. No custom entrypoint,
+CLI-per-action, cron agent or transport runs alongside them.
 
-## Deploy (cloud)
-
-Build and push the image to a registry you control that Plow can pull, then
-deploy it by digest:
-
-```sh
-plow-agents image build REGISTRY/REPOSITORY:TAG
-plow-agents image push REGISTRY/REPOSITORY:TAG
-plow-agents deploy REGISTRY/REPOSITORY@sha256:DIGEST --line LINE_UID
+```mermaid
+flowchart LR
+  User[iMessage] --> Plow[Plow channel]
+  Plow --> LLM[OpenClaw / LLM]
+  LLM --> Workflow[Meetly scheduling tool]
+  Workflow --> Latch[Latch / plow-gog]
+  Workflow --> Wiki[Contact wiki + operation journal]
+  Workflow --> Plow
 ```
 
-A cloud host injects the credentials; there is no `plow-credentials` file.
-The image lists itself on the [Agent Index](https://aiworthusing.com/agent-index)
-as `meetly` (`AGENT_ID`, `AGENT_NAME`, `AGENT_BLURB`, `AGENT_RUNTIME` in the Dockerfile) and
-reports its token usage through the base's pinned reporter.
+The LLM handles language, dates, context, missing details and slot selection.
+Guests use a tool-free model turn scoped to their meeting. The workflow
+checks authority, current proposals, availability and provider receipts.
+Every outgoing message is drafted by the configured model; its draft is
+saved before sending so recovery cannot generate a different duplicate.
+Guests receive answers in their own thread. Booking confirmations and time
+updates include the verified video link without a separate owner request.
 
-## Your Mac: Latch, Messages and Calendar
+The owner's preferences and video-link steps live at
+`entities/owner/scheduling.md`. Each contact has one page at
+`projects/founder-agent/pipeline/<slug>.md`, with exact live calendar IDs,
+actual sent proposals, advisory next steps and a dated prose log.
+These files live in OpenClaw's workspace, normally `/var/lib/plow/workspace`.
+A small SQLite journal remembers unfinished writes and inbox sources; the
+calendar and inbox determine what the wiki can claim.
 
-Run [Latch](https://howto.plow.co/latch) on the Mac that holds your iMessages,
-signed in to the same Plow account, with your Google account connected in
-Latch. Meetly uses the Mac's own skills: `plow-messages` to read texts,
-`contacts` to find people, and `google-workspace` (`plow-gog`) for your
-calendar. Chat works without Latch; reading messages and your calendar does
-not. If the Mac is asleep or Latch is closed for more than 30 minutes, Meetly
-tells you once and picks up where it left off when the Mac is back — no
-message is skipped.
+The monitor runs every five minutes by default, configurable from 1–60.
+It repairs interrupted operations, releases expired holds, checks replies
+and calendar changes, and asks privately about blockers. It nudges the
+owner once after four hours and the contact once after twenty-four hours,
+only while the relevant action remains pending. Pausing stops scheduled work.
 
-## How it runs
+The Dockerfile pins the multi-architecture Plow base and applies an immutable,
+checksummed bootstrap patch from
+[Plow PR #47](https://github.com/plow-pbc/plow-openclaw-agent/pull/47).
+That upstream change makes image-installed native plugins and shared channel
+helpers available. Remove the patch when a published base includes it.
 
-- **Image.** A variant of Plow's
-  [OpenClaw base image](https://github.com/plow-pbc/plow-openclaw-agent),
-  pinned by digest: the base's gateway, Plow channel and reporter, plus
-  Meetly's prompt, skills and its own entrypoint, `boot/preboot.ts`. That is
-  the base's `boot/main.ts` step for step, on the base's compiled modules,
-  with three additions before the config is synced: the model (see
-  [Model](#model)), the setup gate, and a 60 s request timeout on the Mac
-  relay. Without that timeout OpenClaw caps the relay's tool listing at
-  1500 ms, a Mac round trip takes 0.9-1.8 s, and a turn intermittently had no
-  Mac tools at all.
-- **Setup gate.** Before each of the owner's DM turns, the `meetly` plugin
-  runs `setup-status.ts` and puts its answer at the top of the turn, so setup
-  never depends on the model remembering to check. The base owns
-  `plugins.load`, so the plugin sits in the state volume's global plugin root
-  (`/var/lib/plow/extensions/meetly`), copied there from the image on every
-  boot. The owner's name comes from their Plow profile and the time zone from
-  their Mac through Latch; setup asks only what neither can answer.
-- **Schedule.** One OpenClaw scheduler job (`openclaw cron`), `meetly-poll`:
-  an isolated agent turn every five minutes with no automatic delivery,
-  registered by `register-crons.ts` when setup finishes. It lives in the state
-  volume and survives restarts and rebuilds.
-- **Chat.** Your phone DM is the main session and runs setup. A group Meetly
-  opened is recognized from its ledger and handled as that one meeting.
-- **Opening groups.** Meetly uses `start-thread.ts` for owner requests and
-  the scheduled poll. It calls `POST /v1/chats` with the owner plus the
-  contact, trusted, and an idempotency key. An uncertain delivery is
-  recorded without a chat and never resent. Meeting confirmations and
-  approval asks stay in that group; the owner is a participant.
-- **Scripts.** Small TypeScript CLIs in `skills/meetly/scripts/`, run directly
-  by the image's Node (`node <script>.ts`, no build): setup, the message
-  cursor, the request ledger, busy/free-slot math in your time zone, cron
-  registration, the owner-DM lookup and the poll's group start. The model
-  decides; the scripts count.
-- **State.** `/var/lib/plow/meetly`: `config.json` (your setup),
-  `cursor.json` (last message read), `ledger.json` (requests, offered times,
-  hold ids). Writes are atomic and locked.
+## Verify and review
 
-## Model
-
-Every install runs on Plow's GPT-6 Luna. A one-click install has nothing to
-configure and never leaves it. The base's own `plow` provider lists only the
-base's models and is rewritten every boot, so Meetly declares Luna on a
-provider of its own, `plow-luna`: the same Plow endpoint and credential
-reference, in the part of the config the base leaves alone.
-
-The owner of one install can move all of its inference (chat and the
-five-minute poll) to their own OpenAI account. In a login shell on the agent
-(`docker compose exec agent bash -l`, or SSH on the VM):
-
-```sh
-plow-llm openai
-```
-
-It signs in with a device code, checks that the account offers
-`gpt-6-luna` and leaves a marker in the state volume. Restart the agent to
-apply it. The sign-in and the marker live in the state volume, so rebuilds
-and image updates keep them. `plow-llm plow` moves back, and
-`plow-llm status` shows what the next boot will choose.
-
-Plow's Luna stays configured as the fallback: a spent quota or an expired
-sign-in answers from Plow instead of failing. `AGENT_PROVIDER` (`plow`,
-`openai`, `openrouter`) and `AGENT_MODEL` choose a provider from the
-environment instead and outrank the marker; OpenAI then takes
-`OPENAI_API_KEY` or the sign-in, and OpenRouter `OPENROUTER_API_KEY`.
-
-The model is the image's on every boot, so an edit to it in the dashboard
-lasts until the next restart. The sign-in is a real credential for your
-account, kept in the state volume where the agent's own tools can read it.
-Meetly reads your messages, so use it on an install only you talk to.
-
-## Known limitations
-
-- Only direct iMessage chats; group chats and email requests are not read.
-- One person per request.
-- A sender known only by an email (no phone number) cannot get a group; Meetly
-  tells you instead.
-- Rescheduling or cancelling a meeting that is already booked is left to you.
-- If the model provider is unreachable, that five-minute check is skipped and
-  the next one catches up from the same cursor.
-
-## Layout
-
-- `prompt/AGENTS.md` — Meetly's own prompt: who it is first, then the base's
-  tool and authority rules word for word, then how Meetly works.
-- `skills/meetly-setup`, `skills/meetly-poll`, `skills/meetly-group` — what
-  the agent does in setup, in the scheduled check and in a meeting group.
-- `skills/meetly/scripts/` — the TypeScript CLIs behind them.
-- `boot/` — the entrypoint (`preboot.ts`, the base's boot plus Meetly's
-  additions), the model (`llm.ts`), the setup gate install (`gate.ts`), the
-  Mac relay timeout (`mcp.ts`) and the `plow-llm` command.
-- `plugin/` — the setup gate: an OpenClaw plugin that runs `setup-status.ts`
-  before each of the owner's DM turns and hands the model the answer.
-- `tests/` — `node --test` suites; `tests/fixtures/base-AGENTS.md` is the
-  base prompt the tool and authority rules are checked against.
-- `index/logo.png` — the Agent Index logo (uploaded to the listing, not
-  served from here).
-- `checks/` — `manual-scenarios.md` (end-to-end checklist) and `spike.md`
-  (findings from the base code and the owner's Mac).
-- `Dockerfile`, `compose.yml`, `dev/Caddyfile` — the image and local stack.
-
-## Development
-
-Tests need no Plow credentials, no Mac and no network.
+Node 24.16+ is required. Local behavior tests need no credentials or network.
 
 ```sh
 npm ci
-npm run typecheck   # tsc --noEmit
-npm test            # node --test
+npm run typecheck
+npm test
 ```
 
-Node 24.16 or newer. The OpenClaw runtime (`2026.9.6`) comes from the base
-image, pinned by digest.
+[REVIEW.md](REVIEW.md) gives the reading order and evidence links.
+[The acceptance guide](docs/scheduling-spec.md) maps the CEO spec and edge
+cases to tests and describes the real iMessage journey.
 
-### Bumping the base image
+Automatic intake covers direct iMessage requests and replies in served Plow
+groups. Email is research context, not an independent intake channel. A
+provided iMessage email needs no Contacts card. Each meeting has one primary
+chat contact and can invite additional attendees. A calendar invitation is
+not proof that the attendee accepted it. Failed or unavailable providers
+leave the action pending rather than inventing success.
 
-Pick a newer `base-<sha>` tag and its digest from the
-[gallery](https://gallery.ecr.aws/e1h7x4a2/plow-cloud-agents) and update the
-`FROM` line in `Dockerfile`. Then:
-
-1. Copy that commit's `prompt/AGENTS.md` over `tests/fixtures/base-AGENTS.md`.
-2. Diff the new base prompt against the old fixture and carry any changed
-   tool or authority rule into `prompt/AGENTS.md`; `tests/prompt.test.ts`
-   fails on a rule the base rewords.
-3. Copy that commit's `boot/main.ts` over `tests/fixtures/base-main.ts.txt`
-   and carry any changed step into `boot/preboot.ts`; `tests/mcp.test.ts`
-   fails on a base step preboot does not have. Drop `boot/mcp.ts` once the
-   base sets the relay's `requestTimeoutMs` itself.
-4. Re-check `compose.yml` and `dev/Caddyfile` against the base.
-5. Re-read the base's `plugin/index.ts` for `plow_start_thread`:
-   `start-thread.ts` mirrors its `POST /v1/chats`.
-6. Run `npm test`.
-
-## License
+For an existing installation, back up its state volume and finish or cancel
+active legacy proposals before replacing the old workflow. Preserve its wiki
+history and verify imported preferences against the owner's messages. The
+legacy JSON ledger is not automatically migrated.
+Start a fresh native owner session with `/new` after the cutover so obsolete
+script instructions from the previous conversation do not carry forward.
 
 MIT. See [LICENSE](LICENSE).

@@ -15,9 +15,7 @@
     ]
   },
   "include": [
-    "boot/**/*.ts",
-    "skills/**/*.ts",
-    "tests/**/*.ts",
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "tests/**/*.ts"
   ]
 }
