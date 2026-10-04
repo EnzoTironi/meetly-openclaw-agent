@@ -494,6 +494,28 @@ test("paused inbox work stays durable and a replay of a handled guest choice mak
   assert.equal(calls, 1); assert.equal(f.ports.events.size, 1); assert.equal(f.ports.calls.filter(value => value.operation === "update").length, 1);
 });
 
+test("an interrupted legacy booking draft survives a richer model context without repeating the invite or public send", async t => {
+  const f = fixture(t), sent = await f.sent();
+  t.mock.method(f.app, "compose", async (context: unknown) => {
+    if (typeof context === "object" && context !== null && "audience" in context && context.audience === "private owner") throw new Error("model timeout before private drafting completed");
+    return compose(context);
+  });
+  await assert.rejects(f.choose(sent), /model timeout/);
+  const key = `${sent.id}/notice/booked:1/draft`;
+  assert.equal(f.records.operation(key)?.state, "started");
+  const legacy = { audience: "private owner", owner: "Sam", contact: "Taylor", status: "confirmed", facts: "The calendar verified the invitation for the project review." };
+  f.records.db.prepare("UPDATE operations SET input=? WHERE key=?").run(JSON.stringify(legacy), key);
+  const app = new Scheduling(f.records, f.ports, async context => {
+    assert.deepEqual(context, legacy);
+    return "The project review with Taylor is confirmed.";
+  }, () => now);
+  await app.run({ action: "choose", meetingId: sent.id, revision: 1, option: 1 }, guest);
+  assert.equal(f.ports.events.size, 1);
+  assert.equal(f.ports.calls.filter(call => call.operation === "update").length, 1);
+  assert.deepEqual(f.ports.messages.map(message => message.thread), ["group", "group", "owner"]);
+  assert.deepEqual(f.records.uncertain(), []);
+});
+
 test("calendar-confirmed move and cancellation notices recover lost receipts without repeating a write or send", async t => {
   const f = fixture(t), booked = await f.choose(await f.sent());
   f.ports.loseSend = true;
@@ -987,7 +1009,11 @@ test("group proposals and updates use the verified guest's current language, exc
     }
     if (typeof context === "object" && context !== null && "audience" in context && context.audience === "private owner") {
       assert.ok("status" in context); assert.equal(context.status, "confirmed");
-      assert.ok("facts" in context); assert.match(String(context.facts), /calendar verified the invitation/); privateContexts.push(context);
+      assert.ok("facts" in context && typeof context.facts === "object" && context.facts !== null && "invitation" in context.facts);
+      const invitation = context.facts.invitation;
+      assert.ok(typeof invitation === "object" && invitation !== null && "link" in invitation && "attendees" in invitation);
+      assert.equal(invitation.link, "https://meet.google.com/abc-defg-hij");
+      assert.deepEqual(invitation.attendees, ["taylor@example.test"]); privateContexts.push(context);
     }
     return "Mensagem escrita pelo modelo para Taylor.";
   });

@@ -341,6 +341,8 @@ export class Scheduling {
   async draft(key: string, context: unknown): Promise<string> {
     const saved = this.records.operation(key);
     if (saved) return z.object({ text: z.string() }).parse(JSON.parse(saved.input)).text;
+    const previous = this.records.operation(`${key}/draft`);
+    if (previous) context = JSON.parse(previous.input);
     return this.records.effect(`${key}/draft`, context, z.string().trim().min(1).max(10_000), {
       run: () => this.compose(context), retry: "safe",
     });
@@ -428,7 +430,8 @@ export class Scheduling {
     const link = value.details.kind === "video" ? value.invitation.event.conference || value.invitation.event.location : "";
     const text = `The invitation for ${value.details.topic} with ${this.preferences().ownerName} is sent for ${label(value.invitation.event.start, value.details.timezone)}.${link ? ` Join: ${link}` : ""}`;
     await this.publicNotice(value, `r${revision}/booked`, text);
-    await this.privateNotice(cleaned, `booked:${revision}`, `The calendar verified the invitation for ${value.details.topic} with ${value.contact.name}, ${label(value.invitation.event.start, value.details.timezone)}.`, actor.kind === "owner" ? actor.source : undefined);
+    await this.privateNotice(cleaned, `booked:${revision}`, { purpose: "Report the calendar-verified invitation and any pending sibling cleanup privately",
+      details: value.details, invitation: publicContext(value).booked, cleanupPending: cleaned.cleanup.length }, actor.kind === "owner" ? actor.source : undefined);
     return this.records.find(value.id);
   }
   async book(value: Offered | Confirmed, chosen: Slot, marker: string, existing: Confirmed | null): Promise<z.infer<typeof invitation>> {
