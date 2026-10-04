@@ -675,7 +675,8 @@ export class Scheduling {
       switch (value.status) {
         case "held":
           await this.privateNotice(value, `${value.approval === "required" ? "approval" : "publish"}:${value.proposal.revision}`, value.approval === "required"
-            ? this.ownerProposal(value) : `The options for ${value.contact.name} are held. Reply privately to send proposal ${value.proposal.revision}.`);
+            ? this.ownerProposal(value) : { ownerApprovalRequired: false, publication: "unconfirmed",
+              nextStep: "Verify the existing publication receipt before any retry. Owner authorization is already confirmed; do not ask for approval again." });
           break;
         case "sent": await this.verifySent(value); break;
         case "confirmed": await this.reviewInvitation(value); break;

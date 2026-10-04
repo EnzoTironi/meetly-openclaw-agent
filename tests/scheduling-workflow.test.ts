@@ -440,6 +440,19 @@ test("a private approval with lost delivery recovers the actual sent proposal ev
   assert.equal(f.ports.messages.filter(value => value.thread === "group").length, 1);
   assert.equal(f.ports.events.size, 0);
 });
+test("an uncertain authorized publication asks privately for receipt reconciliation, never a second owner approval", async t => {
+  const f = fixture(t), held = await f.held(); f.ports.loseSend = true;
+  await assert.rejects(f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner));
+  f.ports.loseSend = false;
+  const recover = f.ports.recoverSend.bind(f.ports), contexts: unknown[] = [];
+  t.mock.method(f.ports, "recoverSend", async (thread: string, text: string) => thread === "group" ? null : recover(thread, text));
+  t.mock.method(f.app, "compose", async (context: unknown) => { contexts.push(context); return compose(context); });
+  await f.app.reconcile();
+  const notice = contexts.find(value => (value as { facts?: { publication?: string } }).facts?.publication === "unconfirmed") as { audience: string; facts: { ownerApprovalRequired: boolean } };
+  assert.equal(notice.audience, "private owner"); assert.equal(notice.facts.ownerApprovalRequired, false);
+  assert.equal(f.records.find(held.id).status, "held"); assert.equal(f.ports.events.size, 3);
+  assert.equal(f.ports.messages.filter(value => value.thread === "group").length, 1);
+});
 test("owner repair restores a missing attendee on the original event without regenerating its Meet link", async t => {
   const f = fixture(t), sent = await f.sent(); f.ports.missingAttendee = true;
   await assert.rejects(f.choose(sent)); f.ports.missingAttendee = false;

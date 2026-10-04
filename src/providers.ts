@@ -95,9 +95,9 @@ const message = z.object({ uid: id, body: z.string(), direction: z.string(), cre
 type MacRunner = (argv: string[], readPaths?: string[]) => Promise<string>;
 const archiveRow = z.object({ rowid: z.number().int().nonnegative(), chat_guid: id, sender: z.string().nullable(), is_from_me: z.union([z.boolean(), z.literal(0), z.literal(1)]).transform(Boolean), at: z.string(), body: z.string() });
 const lines = (value: string): unknown[] => value.split("\n").filter(line => line.trim()).map(line => JSON.parse(line));
-// Plow's iMessage transport escapes Markdown punctuation in the inbox body.
+// Plow escapes Markdown punctuation and removes hard-break trailing spaces.
 // Compare the displayed text, but persist the exact returned body as proposed.
-const displayed = (value: string): string => value.replace(/\\+([!-/:-@[-`{-~])/g, "$1");
+const displayed = (value: string): string => value.replace(/\\+([!-/:-@[-`{-~])/g, "$1").replace(/[ \t]+$/gm, "");
 export type NativeChannel = {
   send(thread: string, text: string): Promise<unknown>;
   start(actor: Actor, key: string, member: string, text: string): Promise<unknown>;

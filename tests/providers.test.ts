@@ -210,3 +210,14 @@ test("native iMessage Markdown escapes confirm the same displayed message while 
   assert.equal((await p.recoverSend("group", expected, outgoing.created_at))?.text, actual);
   assert.equal(await provider(api([{ ...outgoing, body: actual.replace("Monday at 9", "Monday at 10") }])).recoverSend("group", expected, outgoing.created_at), null);
 });
+
+test("native Markdown hard breaks recover the existing send without accepting changed scheduling facts", async () => {
+  const actual = "Hi Daniel, Enzo could do:\nMonday, October 5, 2:00 PM GMT-3\nWednesday, October 7, 2:00 PM GMT-3\nJoin: https://meet.google.com/abc-defg-hij";
+  const expected = actual.replace(/\n/g, "  \n");
+  const p = provider(api([{ ...outgoing, body: actual }]));
+  assert.equal((await p.send("group", expected)).text, actual);
+  assert.equal((await p.recoverSend("group", expected, outgoing.created_at))?.text, actual);
+  for (const changed of [actual.replace("2:00", "3:00"), actual.replace("October 5", "October 6"), actual.replace("abc-defg-hij", "abc-defg-xyz")]) {
+    assert.equal(await provider(api([{ ...outgoing, body: changed }])).recoverSend("group", expected, outgoing.created_at), null);
+  }
+});
