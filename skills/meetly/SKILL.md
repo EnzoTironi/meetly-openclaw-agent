@@ -5,15 +5,23 @@ description: Research, hold, approve, publish and book meetings through Meetly's
 # Scheduling workflow
 
 Call `meetly` with one action. Its results are confirmed observations; read
-errors and pending cleanup literally. Ordinary replies use the current Plow
-conversation. The workflow owns cross-conversation sends and calendar writes.
+errors and pending cleanup literally. Guest replies use their meeting
+conversation; owner reports go privately. The workflow owns
+cross-conversation sends and calendar writes.
+In a meeting group, the workflow speaks to the guest in their language.
+It already sends the proposal, booking, move and cancellation notice there.
+Do not repeat those messages or address the owner about the guest publicly.
+Owner reports and decisions go privately. Your normal final answer to an
+owner group request is routed to the owner DM, in the owner's request
+language. Use NO_REPLY when the workflow
+already sent the relevant private confirmation.
 
 | Action | Input and behavior |
 |---|---|
 | `status` | Read stored preferences, current pipeline meetings, revisions and unfinished operations. Completed history stays in the contact wiki and is available through `research`; pending cleanup remains visible. With no preferences, includes discovered calendars and timezone. Privately return current state; in a group, its verified contact, timezone, stored `videoProvider` type and public meeting facts. A stored provider needs no new question; `prepare` uses its saved link steps internally. |
 | `remember` | `preferences`: owner name, timezone, write `calendar`, `busyCalendars`, `video`, nullable `defaultFormat`, durations, travel buffer, working hours, notice, monitor interval and `reminderMin` (0 disables the join reminder). Privately confirmed changes only. |
 | `research` | `query`: a name, phone or email. Searches relevant texts, email, Plow threads and contact pages. Read context before asking anything. |
-| `prepare` | `contact: {name, handle}`, `details`, `range: {from, to}`. Details include topic, attendee emails and `kind`: `video`, `in_person` with location, or `phone` with phone handle. Omitted duration uses the stored format duration. For an external Plow request, include its actual `source: {thread, messageId}`. Creates three verified held options and a private external approval gate. |
+| `prepare` | `contact: {name, handle, language?}`, `details`, `range: {from, to}`. Infer the guest's language from their own messages during research; current guest messages override an older language. Details include topic, attendee emails and `kind`: `video`, `in_person` with location, or `phone` with phone handle. Omitted duration uses the stored format duration. For an external Plow request, include its actual `source: {thread, messageId}`. Creates three verified held options and a private external approval gate. |
 | `ask` | `contact`, `question`, optional verified `source`. Records a private owner question for genuinely missing details. |
 | `approve` | `meetingId`, exact `revision`. Private owner only; records inbox approval, then publishes that proposal. |
 | `publish` | `meetingId`, `revision`. Sends held, authorized options and records the exact inbox receipt. A new group requires this active owner DM. Groups remain untrusted. |

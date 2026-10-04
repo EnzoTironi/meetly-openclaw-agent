@@ -322,6 +322,14 @@ export class Scheduling {
       purpose: "Propose these three verified held times as the owner's assistant and ask which one works.",
       options: value.proposal.slots.map(slot => label(slot.start, value.details.timezone)) };
   }
+  async groupContext(value: Meeting, thread?: string): Promise<Record<string, unknown>> {
+    const recent = thread ? await this.ports.replies(thread, iso(this.now() - 30 * 86_400_000)) : [];
+    const guest = recent.filter(input => !input.owner && input.handle === value.contact.handle)
+      .toSorted((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+    return { audience: "meeting group", recipient: value.contact.name, owner: this.preferences().ownerName, contact: value.contact.name,
+      languageSample: guest?.text ?? (value.source.owner ? undefined : value.source.text), recipientLanguage: guest ? undefined : value.contact.language,
+      conversation: guest ? undefined : value.proposed?.text ?? (value.source.thread === thread ? value.source.text : undefined) };
+  }
   async draft(key: string, context: unknown): Promise<string> {
     const saved = this.records.operation(key);
     if (saved) return z.object({ text: z.string() }).parse(JSON.parse(saved.input)).text;
@@ -352,7 +360,7 @@ export class Scheduling {
     if ((value.status === "sent" || value.status === "waiting_on_them" || value.status === "confirmed") && value.proposed?.revision === revision) return value;
     const held = this.held(id, revision, this.records.operation(`${id}/r${revision}/publish`) !== null);
     if (held.approval !== "authorized") throw new Error("The owner must privately approve this exact proposal before times go out.");
-    const text = await this.draft(`${id}/r${revision}/publish`, this.proposalContext(held));
+    const text = await this.draft(`${id}/r${revision}/publish`, { ...this.proposalContext(held), ...await this.groupContext(held, thread) });
     const receipt = await this.records.effect(`${id}/r${revision}/publish`, { member: held.contact.handle, thread: thread ?? null, text }, delivery, {
       run: async () => {
         const current = this.held(id, revision);
@@ -387,7 +395,7 @@ export class Scheduling {
     assertParticipant(actor, existing);
     if (existing.status === "confirmed" && existing.proposed?.revision === revision) {
       assertChoice(existing, option);
-      return this.finishBooking(existing, revision);
+      return this.finishBooking(existing, revision, actor);
     }
     const marker = `${id}/r${revision}/book${option}`;
     const previous = this.records.operation(marker);
@@ -405,14 +413,14 @@ export class Scheduling {
       cleanup: [...value.cleanup, ...value.proposal.slots.filter(other => other !== chosen).flatMap(other => [other.meeting, ...other.travel])], updatedAt: iso(this.now()) });
     this.records.save(next, `The calendar verified invitation ${booked.event.ref.id} and all attendees. An invitation is not an RSVP acceptance.`);
     if (next.status !== "confirmed") throw new Error("The calendar invitation was not recorded as confirmed.");
-    return this.finishBooking(next, revision);
+    return this.finishBooking(next, revision, actor);
   }
-  async finishBooking(value: Confirmed, revision: number): Promise<Meeting> {
+  async finishBooking(value: Confirmed, revision: number, actor: Actor): Promise<Meeting> {
     const cleaned = await this.cleanup(value.id);
     const link = value.details.kind === "video" ? value.invitation.event.conference || value.invitation.event.location : "";
     const text = `The invitation for ${value.details.topic} with ${this.preferences().ownerName} is sent for ${label(value.invitation.event.start, value.details.timezone)}.${link ? ` Join: ${link}` : ""}`;
     await this.publicNotice(value, `r${revision}/booked`, text);
-    await this.privateNotice(cleaned, `booked:${revision}`, `The calendar verified the invitation for ${value.details.topic} with ${value.contact.name}, ${label(value.invitation.event.start, value.details.timezone)}.`);
+    await this.privateNotice(cleaned, `booked:${revision}`, `The calendar verified the invitation for ${value.details.topic} with ${value.contact.name}, ${label(value.invitation.event.start, value.details.timezone)}.`, actor.kind === "owner" ? actor.source : undefined);
     return this.records.find(value.id);
   }
   async book(value: Offered | Confirmed, chosen: Slot, marker: string, existing: Confirmed | null): Promise<z.infer<typeof invitation>> {
@@ -537,7 +545,7 @@ export class Scheduling {
     if (!value.proposed || value.status === "do_not_contact") return;
     const thread = value.proposed.thread, key = `${value.id}/${reason}-notice`;
     if ((await this.ports.groupContact(thread)).handle !== value.contact.handle) throw new Error("The meeting conversation no longer has its verified contact; resolve it privately.");
-    const text = await this.draft(key, { audience: "guest", recipient: value.contact.name, contact: value.contact.name, facts, conversation: value.proposed.text, owner: this.preferences().ownerName,
+    const text = await this.draft(key, { ...await this.groupContext(value, thread), facts,
       invitation: value.status === "confirmed" ? { start: value.invitation.event.start, end: value.invitation.event.end,
         timezone: value.details.timezone, attendees: value.invitation.event.attendees,
         link: value.details.kind === "video" ? value.invitation.event.conference || value.invitation.event.location : null } : null });
@@ -549,21 +557,21 @@ export class Scheduling {
       await this.records.effect(`${key}-log`, {}, z.boolean(), { run: async () => true, retry: "safe" });
     }
   }
-  async privateNotice(value: Meeting, reason: string, facts: unknown, request: Source = value.source): Promise<z.infer<typeof delivery>> {
+  async privateNotice(value: Meeting, reason: string, facts: unknown, request?: Source): Promise<z.infer<typeof delivery>> {
     const thread = await this.ports.ownerThread();
     const key = `${value.id}/notice/${reason}`, text = await this.draft(key, { audience: "private owner", owner: this.records.owner()?.ownerName, contact: value.contact.name,
-      languageSample: this.records.ownerSource(thread)?.text, request: { origin: request.owner ? "owner" : "external", message: request.text }, facts });
-    return this.records.effect(key, { thread, text }, delivery, { run: () => this.ports.send(thread, text),
+      languageSample: this.records.ownerSource(thread)?.text, request: { origin: (request ?? value.source).owner ? "owner" : "external", message: (request ?? value.source).text }, status: value.status, facts });
+    return this.records.effect(key, { thread, text }, delivery, { run: () => request?.owner ? this.sendReply(thread, request, text) : this.ports.send(thread, text),
       recover: () => this.ports.recoverSend(thread, text, value.createdAt) });
   }
   async reply(input: Source, text: string): Promise<void> {
     if (input.channel !== "plow") return;
     await this.sendReply(input.thread, input, text);
   }
-  async sendReply(thread: string, input: Source, text: string): Promise<void> {
+  async sendReply(thread: string, input: Source, text: string): Promise<z.infer<typeof delivery>> {
     const key = `reply:${hash([thread, input.messageId])}`, saved = this.records.operation(key);
     if (saved) text = z.object({ text: z.string() }).parse(JSON.parse(saved.input)).text;
-    await this.records.effect(key, { thread, text }, delivery, {
+    return this.records.effect(key, { thread, text }, delivery, {
       run: () => this.ports.send(thread, text), recover: () => this.ports.recoverSend(thread, text, input.at),
     });
   }

@@ -92,7 +92,7 @@ function fixture(t: TestContext) {
   records.remember(prefs, ownerSource);
   let clock = now;
   const app = new Scheduling(records, ports, compose, () => clock);
-  t.after(() => { records.close(); rmSync(root, { recursive: true }); });
+  t.after(() => { if (records.db.isOpen) records.close(); rmSync(root, { recursive: true }); });
   const held = async (external = false, format = "video") => meeting.parse(await app.run({ ...prepare,
     ...(external ? { source: { thread: "group", messageId: guestSource.messageId } } : {}),
     details: format === "in_person" ? { ...prepare.details, kind: format, location: "Fixture office" } : prepare.details }, owner));
@@ -486,7 +486,7 @@ test("a moved video meeting supplies its verified link and attendees to the mode
   }, () => now);
   await app.run({ action: "move", meetingId: booked.id, start: "2026-10-08T10:00:00Z" }, owner);
   const invitation = (contexts[0] as { invitation: { start: string; link: string; attendees: string[] } }).invitation;
-  assert.equal((contexts[0] as { audience: string }).audience, "guest");
+  assert.equal((contexts[0] as { audience: string }).audience, "meeting group");
   assert.equal((contexts[0] as { recipient: string }).recipient, "Taylor");
   assert.equal(invitation.start, "2026-10-08T10:00:00Z");
   assert.equal(invitation.link, booked.invitation.event.conference);
@@ -848,4 +848,67 @@ test("private drafting separates the owner's language sample from this guest's a
   });
   await new Inbound(f.app, async () => assert.fail("Only the actual private draft is tested here")).defer(booked, input, "Please approve the guest's move privately.");
   assert.equal(f.ports.messages.at(-1)?.thread, "owner");
+});
+
+test("group proposals and updates use the verified guest's current language, excluding the owner and other contacts", async t => {
+  const f = fixture(t), contexts: unknown[] = [], privateContexts: unknown[] = [];
+  const actor: Actor = { ...owner, mainDm: false, source: { ...ownerSource, thread: "group", text: "Please schedule our meeting." } };
+  const currentGuest = source.parse({ ...guestSource, messageId: "current-guest-language", text: "Podemos conversar na próxima semana?" });
+  t.mock.method(f.ports, "replies", async () => [
+    { ...currentGuest, text: "Can we meet?", at: new Date(now - 86_400_000).toISOString() }, currentGuest,
+    { ...currentGuest, owner: true, text: "Speak English to me.", at: new Date(now + 1).toISOString() },
+    { ...currentGuest, handle: "someone-else@example.test", text: "My language is English.", at: new Date(now + 2).toISOString() },
+  ]);
+  t.mock.method(f.app, "compose", async (context: unknown) => {
+    if (typeof context === "object" && context !== null && "audience" in context && context.audience === "meeting group") {
+      assert.ok("languageSample" in context); assert.equal(context.languageSample, currentGuest.text);
+      assert.ok("recipientLanguage" in context); assert.equal(context.recipientLanguage, undefined);
+      assert.ok("conversation" in context); assert.equal(context.conversation, undefined);
+      assert.ok("recipient" in context); assert.equal(context.recipient, "Taylor"); contexts.push(context);
+    }
+    if (typeof context === "object" && context !== null && "audience" in context && context.audience === "private owner") {
+      assert.ok("status" in context); assert.equal(context.status, "confirmed");
+      assert.ok("facts" in context); assert.match(String(context.facts), /calendar verified the invitation/); privateContexts.push(context);
+    }
+    return "Mensagem escrita pelo modelo para Taylor.";
+  });
+  await f.app.run({ ...prepare, contact: { ...prepare.contact, language: "English" } }, actor);
+  const held = f.records.contact(prepare.contact.handle)?.meetings.at(-1); assert.ok(held);
+  await f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, actor);
+  await f.app.run({ action: "repropose", meetingId: held.id, revision: 1, range: prepare.range }, actor);
+  await f.app.run({ action: "choose", meetingId: held.id, revision: 2, option: 1 }, actor);
+  assert.equal(contexts.length, 3); assert.equal(f.ports.messages.filter(message => message.thread === "group").length, 3);
+  assert.equal(privateContexts.length, 1);
+});
+
+test("a newly opened group uses the researched guest language without exposing the private owner request", async t => {
+  const f = fixture(t);
+  const actor: Actor = { ...owner, source: { ...ownerSource, text: "A private owner request with personal context." } };
+  t.mock.method(f.app, "compose", async (context: unknown) => {
+    assert.ok(typeof context === "object" && context !== null);
+    assert.ok("recipientLanguage" in context); assert.equal(context.recipientLanguage, "Portuguese");
+    assert.ok("conversation" in context); assert.equal(context.conversation, undefined);
+    return "Taylor, qual destes horários funciona para você?";
+  });
+  const held = meeting.parse(await f.app.run({ ...prepare, contact: { ...prepare.contact, language: "Portuguese" } }, actor));
+  await f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, actor);
+  assert.equal(f.ports.messages[0]?.thread, "group");
+});
+
+test("an owner choice and its native final reply share one durable private confirmation across restart", async t => {
+  const f = fixture(t), sent = await f.sent();
+  const input = source.parse({ ...ownerSource, thread: "group", messageId: "owner-group-choice", text: "Pode confirmar a primeira opção para esse teste." });
+  const actor: Actor = { ...owner, source: input, mainDm: false };
+  const booked = await f.app.run({ action: "choose", meetingId: sent.id, revision: 1, option: 1 }, actor);
+  assert.ok(booked);
+  const confirmation = f.ports.messages.filter(value => value.thread === "owner");
+  assert.equal(confirmation.length, 1);
+  await f.app.sendReply("owner", input, "A redundant final answer from the host model.");
+  f.records.close();
+  const recovered = new Records(f.root);
+  const restarted = new Scheduling(recovered, f.ports, compose, () => now);
+  try { await restarted.sendReply("owner", input, "Another final answer after restart."); }
+  finally { recovered.close(); }
+  assert.equal(f.ports.messages.filter(value => value.thread === "owner").length, 1);
+  assert.equal(f.ports.messages.filter(value => value.thread === "group").length, 2, "The actual proposal and booking notice remain public");
 });
