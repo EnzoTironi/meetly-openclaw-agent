@@ -4,7 +4,10 @@ description: Research, hold, approve, publish and book meetings through Meetly's
 ---
 # Scheduling workflow
 
-Call `meetly` with one action. The native response contains `result` and
+Call `meetly` with one action. The native response contains `ownerRequest`,
+the verified current owner's text; use it as the language cue for your
+private final report, even when earlier owner messages used another language.
+It also contains `result` and
 `deliveredMessages`, verified inbox receipts for this meeting since the
 current request. Read them before writing anything: a delivered guest notice
 needs no extra `reply`. Only send another reply when the owner explicitly
