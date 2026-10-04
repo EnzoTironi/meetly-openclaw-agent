@@ -30,4 +30,23 @@ behavior is represented by the acceptance matrix: group replies, private
 owner gates, researched formats, minimum notice, honest delivery and invites,
 re-proposal, wiki/DNC, travel lifecycle and permitted block moves. Ambiguous
 choices always ask privately; this rewrite does not silently choose the first
-slot. Format comes from context rather than an invented default.
+slot. Format comes from context first, then an explicitly remembered default.
+The latest feature pass adds existing-group owner requests, join reminders,
+current travel buffers, live calendar links, request-scoped owner exceptions
+and privately approved Mac discovery. The acceptance matrix distinguishes
+code tests, real-model connector fixtures and physical iMessage evidence.
+
+The feature pass has 104 passing behavior tests and typecheck, with each
+code commit checked independently. The recorded native model acceptance
+has 40 distinct successful case outcomes; failed attempts and fixes are
+attached alongside them. Completed history stays in the wiki and research
+instead of filling the current status response and hiding active meetings.
+Meetly's own monitor handles reminders; the deployment instructions disable
+the separate OpenClaw heartbeat.
+
+Fresh physical Messages acceptance is blocked by a Mac AppleEvent timeout.
+Earlier real iMessage/calendar evidence predates this feature pass. Zoom
+account creation and an actual elapsed 24-hour reminder remain unverified.
+The structural delta has four aggregate class-size regressions and exits 2;
+it has no function-complexity, nesting, parameter or duplication regressions.
+No suppressions or baseline reset were added. This is not a green quality score.

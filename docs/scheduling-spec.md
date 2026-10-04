@@ -9,16 +9,16 @@ never from a name or a claim inside a message.
 
 | Requirement | Implementation and regression evidence |
 |---|---|
-| Owner or external request | `inbound.ts` interprets incoming messages on the agent's served Plow threads; the native owner tool uses the verified private conversation. Mac texts are research only. Workflow tests cover both origins and implicit meeting language. |
+| Owner or external request | `inbound.ts` interprets incoming messages on the agent's served Plow threads; the native owner tool verifies private/group owner identity. New direct Mac requests need a captured source receipt and private owner approval; archive research has no authority. Workflow tests cover both origins and implicit meeting language. |
 | Research before proposing | `research` reads texts, full email bodies, earlier calendar meetings, served Plow threads and contact wiki. Missing context goes privately to the owner. A supplied iMessage email bypasses Contacts lookup. |
 | Three held slots | `availability.ts` checks all configured calendars, timezone, working hours and notice. Workflow tests verify three calendar holds, or nine events with in-person travel. |
 | External owner gate | Only private approval of the current revision permits publication. Tests reject guest approval, premature publication and carried approval after re-proposal. |
 | Invite, link, cleanup | `invitation.ts` verifies time, every attendee and the saved provider link. Tests retain siblings on a missing link/attendee/tentative invite and delete them only after recovery. |
-| Monitor every X minutes | Native service uses `monitorMin`. Tests cover expiry, pending writes, replies, owner/contact reminders, unavailable providers and pause. |
+| Monitor every X minutes | Native service uses `monitorMin`. Tests cover expiry, pending writes, replies, owner/contact/join reminders, current links, unavailable providers and pause. |
 | Re-propose | Reject-all replaces the old holds and excludes their starts. Old revisions cannot book. External replacements need fresh approval. |
 | Priorities | Only owner-listed exact titles on the write calendar may move, with verified owner creation and without attendees or conferences. Creator email must match the queried account, or the provider must supply its compact ownership proof; `self` flags are insufficient. Tests preserve collaborator/unproven blocks and hard appointments, and exclude private titles from outgoing context. |
 | One contact wiki | `records.ts` retains a stable contact page with exact IDs, sent receipts, advisory `next_step` and dated prose. Tests cover renamed contacts and interrupted page writes. |
-| Remember preferences | Owner-confirmed provider, room mode, durations, travel and explicit link steps are stored under `entities/owner`. Tests cover all three video modes, zero travel and link preservation on move. |
+| Remember preferences | Owner-confirmed provider, room mode, durations, travel and explicit link steps are stored under `entities/owner`. Tests cover all three video modes, zero travel, current buffers on move, remembered default format and link preservation on move. |
 | Write as assistant | Model instructions require third-person owner wording. Validate the actual model's outgoing text in the integration and iMessage runs. |
 | Natural guest conversation | The LLM answers ordinary questions in the guest's thread from verified attendees and links. Owner-gated requests get a model-written acknowledgement. Booking and move notices include the link automatically. |
 | Find answers first / private clarification | Context research precedes missing-detail questions. Fixtures cover an email-only contact, missing provider and the origin of private owner questions. |
@@ -30,12 +30,21 @@ The behavior tests exercise unknown create/send responses, restart recovery,
 partial hold failure, delayed receipt recovery after expiry, incomplete or
 unreadable calendars, all-day daylight-saving boundaries, duplicate inbound
 delivery, competing choices, cross-contact choices, repurposed holds,
-blocked contacts, and calendar-side moves/cancellations.
+blocked contacts, and calendar-side moves/cancellations. New tests cover
+owner requests inside existing groups, exact contact/roster scope, private
+external approval inside those groups, current travel preferences (0→45→0),
+same-time calendar link changes, and guest answers while calendar reads fail.
+Owner exceptions allow only explicit working-hours changes and exact event
+IDs for one proposal; future conflicts remain busy and preferences stay
+unchanged. Every proposal still has exactly three held options.
 Reused contact groups select the newest sent proposal. Research excludes
 other phone lines and closed chats. Native Code Mode may orchestrate the
 scheduling tool while raw calendar, message and file writes stay guarded.
-Unrelated Mac conversations cannot enter the scheduling inbox. Tests verify
-that previously queued archive rows and tasks cause no model calls or sends.
+Mac discovery captures new direct receipts per sender and starts after a
+baseline cursor. The LLM ignores unrelated conversations; discovered
+requests can only prepare privately gated meetings. Tests verify that
+previously queued archive rows without new provenance cause no model calls
+or sends, and owner-answered messages do not trigger a second response.
 An unanchored private-decision interpretation cannot start a new task. The
 first verified interpretation persists across receipt retries, preventing a
 second interpretation from creating a different question for the same message.
@@ -83,8 +92,32 @@ contact. Keep `AGENT_ID` empty. Label all meetings as tests.
 8. Exercise vague language, split messages, owner impersonation, private-detail
    requests, pause, do-not-contact and unrelated-conversation isolation. Check
    reminders once, with model-written text and no stale outreach after a reply.
+9. Schedule directly in the existing group. Confirm no duplicate group is
+   opened and external approval still goes privately to the owner. Change
+   the travel buffer, move an in-person meeting and verify both new blocks.
+10. Discover a new direct Mac request. Verify private approval precedes any
+    public times. Replay the Lívia household message and an owner-answered
+    message: neither may create a meeting or outreach. Check a join reminder
+    and a calendar-side link change without coaching the agent to send it.
 
 Unit tests, native OpenClaw/model runs with fake connectors, and physical
 Messages/calendar runs are distinct evidence. Only the last proves delivery
 through the real iMessage path. Attach their visual evidence to the PR using
 `gh --attach`; keep traces, credentials and generated reports outside Git.
+
+The current feature pass typechecks and passes 104 behavior tests. Its 40
+recorded native model scenarios use simulated connectors: M01–M23 cover
+the scheduling contract, guest questions, video modes, privacy and delivery;
+N01–N17 cover groups, travel changes, live links, scoped exceptions, defaults,
+Mac discovery, the real periodic join-reminder timer, and verified structured
+Latch read receipts. Calendar discovery uses permitted calendar reads and
+preserves each connected account; degraded, unrecognized or incomplete
+calendar data cannot become free time. The natural final
+cancellation also verifies all new fixture meetings and recorded holds are
+closed. Failed attempts remain in the attached evidence with their fixes.
+
+A new physical Messages interaction is blocked by AppleEvent timeout
+`-1712`. Prior real iMessage evidence is labeled with its earlier release.
+Connected Zoom creation and an actual elapsed 24-hour reminder have not been
+physically accepted. The native service remains responsible for scheduling
+monitoring; the separate OpenClaw heartbeat is disabled during deployment.

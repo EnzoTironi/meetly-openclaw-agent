@@ -4,9 +4,10 @@ Meetly is a scheduling assistant you text through Plow. It researches the
 conversation, holds three options, gets private owner approval for external
 requests, and verifies the invitation before releasing the other holds.
 The LLM interprets the request and writes every message, including reminders.
-Meetly accepts requests in its own Plow conversations. It reads email and
-Mac texts to research those meetings; other conversations never trigger
-outreach or private questions.
+The owner can schedule in a private DM or an existing meeting group.
+Meetly also discovers new direct iMessage requests on the Mac, with private
+owner approval before any outreach. Email and prior messages are research;
+unrelated tasks and other assistants' reports do not start meetings.
 
 ## Run privately on a local line
 
@@ -20,13 +21,23 @@ git clone https://github.com/EnzoTironi/meetly-openclaw-agent.git
 cd meetly-openclaw-agent
 plow-agents login
 plow-agents deploy --local --line YOUR_LINE_UID
+docker compose up -d
+docker compose exec agent openclaw config set agents.defaults.heartbeat.every 0m
+docker compose restart agent
 ```
+
+Meetly's native service handles monitoring and model-written reminders.
+The configuration above disables the separate OpenClaw heartbeat so its
+framework alerts do not appear in the scheduling conversation.
 
 Text that line. Meetly discovers your calendars and timezone, then asks
 privately for preferences it cannot find. Save your video provider once:
 Google Meet, a personal Zoom room, or a new Zoom link per meeting. New Zoom
 links require a Zoom account connected to `plow-gog` through Latch.
 Durations, travel buffers, working hours and reminder settings are reused.
+An optional default meeting format fills gaps only when context does not
+establish the format. Explicit owner exceptions apply to one request and
+preserve the three-option workflow; they do not change global preferences.
 
 The image has an empty `AGENT_ID`, so private tests do not register on the
 Agent Index or report usage. Keep it empty in `plow-credentials`. Publishing
@@ -83,7 +94,11 @@ The monitor runs every five minutes by default, configurable from 1–60.
 It repairs interrupted operations, releases expired holds, checks replies
 and calendar changes, and asks privately about blockers. It nudges the
 owner once after four hours and the contact once after twenty-four hours,
-only while the relevant action remains pending. Pausing stops scheduled work.
+only while the relevant action remains pending. A video meeting gets one
+model-written join reminder with its current verified link, ten minutes
+before it starts by default (`reminderMin: 0` disables it). Pausing stops
+scheduled work. Discovery starts at the newest Mac receipt when first
+enabled, then durably processes new messages without replaying history.
 
 The Dockerfile pins the multi-architecture Plow base and applies an immutable,
 checksummed bootstrap patch from
@@ -105,8 +120,11 @@ npm test
 [The acceptance guide](docs/scheduling-spec.md) maps the CEO spec and edge
 cases to tests and describes the real iMessage journey.
 
-Automatic intake covers direct iMessage requests and replies in served Plow
-groups. Email is research context, not an independent intake channel. A
+Automatic intake covers new direct iMessage requests discovered on the Mac
+and messages in served Plow groups. Mac discovery can prepare holds or ask
+privately about missing details; only private owner approval can publish.
+Group actions are limited to their verified contact, and external approval
+always stays private. Email is research context, not an independent intake channel. A
 provided iMessage email needs no Contacts card. Each meeting has one primary
 chat contact and can invite additional attendees. A calendar invitation is
 not proof that the attendee accepted it. Failed or unavailable providers
