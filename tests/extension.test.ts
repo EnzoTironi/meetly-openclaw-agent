@@ -120,7 +120,11 @@ test("the native reply boundary sends the owner's group report privately once an
   assert.equal(completions.length, 0, "The reply boundary forwards model text without generating a canned answer");
   assert.deepEqual(sent, [{ thread: "owner", text }]);
   await receive({ messageId: privateInput.uid }, { ...context, conversationId: "owner" });
-  await tool.execute("ask-call", { action: "ask", contact: { name: "Daniel", handle: "guest@example.test" }, question: "Where will the English Project Review take place?" });
+  const asked = await tool.execute("ask-call", { action: "ask", contact: { name: "Daniel", handle: "guest@example.test" }, question: "Where will the English Project Review take place?" });
+  assert.ok(typeof asked === "object" && asked !== null && "details" in asked);
+  const observations = asked.details;
+  assert.ok(typeof observations === "object" && observations !== null && "deliveredMessages" in observations);
+  assert.deepEqual(observations.deliveredMessages, [{ thread: "owner", messageId: "private-final-2", at: "2026-10-04T10:00:01.000Z", text: "Enzo, qual local devemos usar?" }]);
   assert.equal(completions.length, 2);
   assert.deepEqual(JSON.parse(completions[0]!.message), { languageSample: privateInput.body }, "Language inference receives only the recipient's cue, without conflicting meeting facts");
   assert.match(completions[1]!.message, /^Write entirely in Portuguese\./);

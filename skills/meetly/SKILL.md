@@ -4,7 +4,12 @@ description: Research, hold, approve, publish and book meetings through Meetly's
 ---
 # Scheduling workflow
 
-Call `meetly` with one action. Its results are confirmed observations; read
+Call `meetly` with one action. The native response contains `result` and
+`deliveredMessages`, verified inbox receipts for this meeting since the
+current request. Read them before writing anything: a delivered guest notice
+needs no extra `reply`. Only send another reply when the owner explicitly
+requested separate content that the notice did not answer.
+Its results are confirmed observations; read
 errors and pending cleanup literally. Guest replies use their meeting
 conversation; owner reports go privately. The workflow owns
 cross-conversation sends and calendar writes.
