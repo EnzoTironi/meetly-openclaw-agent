@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -452,6 +452,19 @@ test("an uncertain authorized publication asks privately for receipt reconciliat
   assert.equal(notice.audience, "private owner"); assert.equal(notice.facts.ownerApprovalRequired, false);
   assert.equal(f.records.find(held.id).status, "held"); assert.equal(f.ports.events.size, 3);
   assert.equal(f.ports.messages.filter(value => value.thread === "group").length, 1);
+});
+test("restart restores a stale held wiki from its confirmed publication receipt without sending or reserving again", async t => {
+  const f = fixture(t), held = await f.held(), path = f.records.path(held.contact);
+  const stale = readFileSync(path, "utf8");
+  const sent = meeting.parse(await f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner));
+  f.records.close(); writeFileSync(path, stale);
+  const reopened = new Records(f.root); t.after(() => reopened.close());
+  const writes = f.ports.calls.length;
+  await new Scheduling(reopened, f.ports, compose, () => now).reconcile();
+  const recovered = reopened.find(held.id);
+  assert.equal(recovered.status, "waiting_on_them"); assert.deepEqual(recovered.proposed, sent.proposed);
+  assert.equal(f.ports.calls.length, writes); assert.equal(f.ports.events.size, 3);
+  assert.deepEqual(reopened.uncertain(), []);
 });
 test("owner repair restores a missing attendee on the original event without regenerating its Meet link", async t => {
   const f = fixture(t), sent = await f.sent(); f.ports.missingAttendee = true;

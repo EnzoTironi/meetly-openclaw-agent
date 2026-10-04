@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -15,7 +15,11 @@ const queues = shared[queueKey] ??= new Map<string, Promise<unknown>>();
 function atomic(path: string, value: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const temp = `${path}.${randomUUID()}.tmp`;
-  try { writeFileSync(temp, value, { mode: 0o600 }); renameSync(temp, path); }
+  try {
+    writeFileSync(temp, value, { mode: 0o600, flush: true }); renameSync(temp, path);
+    const folder = openSync(dirname(path), "r");
+    try { fsyncSync(folder); } finally { closeSync(folder); }
+  }
   finally { rmSync(temp, { force: true }); }
 }
 

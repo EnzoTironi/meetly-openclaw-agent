@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { conflicts, insideHours, label, movableBlock, plan, restrictRange, windows } from "./availability.ts";
 import { advice, assertInvitation, assertOwner, assertParticipant, command, DecisionRequired, delivery, details, endOf, event, eventRef, invitation, liveHolds, meeting, permissions, proposal, publicContext, refKey, source,
-  type Actor, type Calendar, type Command, type Confirmed, type Details, type Event, type EventRef, type Held, type Meeting, type Offered, type Permissions, type Preferences, type Range, type Slot, type Source } from "./model.ts";
+  type Actor, type Calendar, type Command, type Confirmed, type Delivery, type Details, type Event, type EventRef, type Held, type Meeting, type Offered, type Permissions, type Preferences, type Range, type Slot, type Source } from "./model.ts";
 import { invitationWrite, verifyBooked } from "./invitation.ts";
 import { Records, RejectedEffect } from "./records.ts";
 import { writeEvent, type Ports, type WriteEvent } from "./providers.ts";
@@ -381,10 +381,13 @@ export class Scheduling {
       recover: () => thread ? this.ports.recoverSend(thread, text, held.createdAt) : this.ports.recoverThread(held.contact.handle, text, held.createdAt),
       retry: !thread && actor.kind === "owner" && "sessionKey" in actor.hostContext ? "safe" : undefined,
     });
-    const current = this.held(id, revision, true);
-    const next = meeting.parse({ ...current, status: "sent", proposed: { ...receipt, revision, slots: current.proposal.slots }, updatedAt: receipt.at });
-    this.records.save(next, `The inbox verified proposal ${revision}, message ${receipt.messageId}. Actual text: ${receipt.text}`);
+    this.recordPublication(this.held(id, revision, true), receipt);
     return this.cleanup(id);
+  }
+  private recordPublication(value: Held, receipt: Delivery): void {
+    const revision = value.proposal.revision;
+    const next = meeting.parse({ ...value, status: "sent", proposed: { ...receipt, revision, slots: value.proposal.slots }, updatedAt: receipt.at });
+    this.records.save(next, `The inbox verified proposal ${revision}, message ${receipt.messageId}. Actual text: ${receipt.text}`);
   }
   async meetingThread(value: Meeting, actor: Actor): Promise<string | undefined> {
     const thread = value.proposed?.thread ?? (value.source.channel === "plow" && value.source.thread !== await this.ports.ownerThread() ? value.source.thread : undefined);
@@ -667,6 +670,13 @@ export class Scheduling {
       : { kind: "owner", source: authority.source, mainDm: authority.mainDm, hostContext: {} };
   }
   async reviewMeeting(value: Meeting): Promise<void> {
+    if (value.status === "held") {
+      const publication = this.records.operation(`${value.id}/r${value.proposal.revision}/publish`);
+      if (publication?.state === "confirmed") {
+        this.recordPublication(value, delivery.parse(JSON.parse(publication.receipt ?? "null")));
+        value = this.records.find(value.id);
+      }
+    }
     if ("proposal" in value && Date.parse(value.proposal.expiresAt) <= this.now()
       && !this.records.activeWith(`${value.id}/r${value.proposal.revision}/book`).length
       && this.records.operation(`${value.id}/r${value.proposal.revision}/publish`)?.state !== "started") {
