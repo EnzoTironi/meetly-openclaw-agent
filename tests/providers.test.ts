@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calendar, eventRef, source } from "../src/model.ts";
+import { calendar, details, eventRef, preferences, slot, source } from "../src/model.ts";
 import { parseEvent, parseListing, Providers, type NativeChannel } from "../src/providers.ts";
+import { movableBlock } from "../src/availability.ts";
+import { verifyBooked } from "../src/invitation.ts";
 
 const cal = calendar.parse({ account: "sam@example.test", id: "primary" });
 const range = { from: "2026-10-05T08:00:00Z", to: "2026-10-16T20:00:00Z" };
@@ -22,6 +24,78 @@ const api = (messages = [incoming, outgoing]): typeof fetch => async input => {
   if (url.includes("/messages?")) return Response.json({ data: messages, has_more: false });
   return Response.json(url.endsWith("/owner") ? home : group);
 };
+
+test("quoted Google event text supports permitted priorities and the owner's exact personal Zoom URL", async () => {
+  const quoted = (value: string) => `<<<EXTERNAL_UNTRUSTED_CONTENT id="calendar-read">>>\nSource: google_api\n---\n${value}\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="calendar-read">>>`;
+  const ref = eventRef.parse({ calendar: cal, id: raw.id });
+  const read = (value: object) => provider(api(), async () => JSON.stringify(value)).read(ref);
+  const block = await read({ ...raw, summary: quoted("Prayer time"), attendees: [], creator: { email: cal.account } });
+  assert.ok(block);
+  const prefs = preferences.parse({ ownerName: "Sam", timezone: "UTC", calendar: cal, busyCalendars: [cal], video: null, movableTitles: ["Prayer time"] });
+  assert.equal(movableBlock(block, prefs, Date.parse("2026-10-04T08:00:00Z")), true);
+  const unproven = await read({ ...raw, summary: quoted("Prayer time"), attendees: [], creator: { email: "collaborator@example.test" } });
+  assert.ok(unproven); assert.equal(movableBlock(unproven, prefs, Date.parse("2026-10-04T08:00:00Z")), false);
+  const url = "https://zoom.us/my/sam", observed = await read({ ...raw, location: quoted(url), summary: quoted("Project review") });
+  assert.ok(observed);
+  const booking = { details: details.parse({ topic: "Project review", kind: "video", video: { kind: "zoom_personal", url }, attendees: [guest.provider_key], timezone: "UTC", durationMin: 30 }),
+    chosen: slot.parse({ meeting: ref, start: observed.start, durationMin: 30, travel: [] }), marker: "booking", previous: null };
+  assert.equal(verifyBooked(observed, booking).event.location, url);
+  for (const location of [quoted(url).replace('id="calendar-read">>>', 'id="different">>>'), quoted(url).replace("Source: google_api", "Source: other")]) {
+    const rejected = await read({ ...raw, location });
+    assert.ok(rejected); assert.throws(() => verifyBooked(rejected, booking));
+  }
+});
+
+test("a served group derives exactly one guest from the roster and rejects mixed-contact groups", async () => {
+  assert.equal((await provider(api()).groupContact("group")).handle, guest.provider_key);
+  await assert.rejects(provider(api()).groupContact("owner"), /single verified/);
+  const extra = { ...guest, uid: "other", provider_key: "other@example.test" };
+  await assert.rejects(provider(async input => String(input).endsWith("/agents/me") ? api()(input) : Response.json({ ...group, participants: [...group.participants, extra] })).groupContact("group"), /single verified/);
+});
+test("initial calendar discovery uses permitted calendar reads and retains each connected account", async () => {
+  const calls: string[][] = [], primary = { id: cal.account, primary: true, timeZone: "America/Sao_Paulo" };
+  const p = provider(api(), async argv => {
+    calls.push(argv);
+    if (argv[0] === "readlink") throw new Error("Mac timezone unavailable");
+    assert.deepEqual(argv, ["plow-gog", "calendar", "calendars", "--json"]);
+    return JSON.stringify({ items: [primary, { id: "shared", account: "work@example.test" }] });
+  });
+  const discovery = await p.discover() as { timezone: string; video: null; calendars: { account: string; listing: { calendars: unknown[] } }[] };
+  assert.equal(discovery.timezone, primary.timeZone); assert.equal(discovery.video, null);
+  assert.deepEqual(discovery.calendars.map(value => value.account), [cal.account, "work@example.test"]);
+  assert.ok(discovery.calendars.every(value => value.listing.calendars.length === 1));
+  assert.ok(!calls.some(argv => argv[1] === "auth"));
+});
+test("Latch structured read receipts require completion, preserve pagination and reject degraded or unknown data", async () => {
+  const receipt = { status: "completed", degraded: [], items: [raw], nextPageToken: "more" };
+  const mac = (value: unknown) => new Providers(native, () => "UTC", { ...env, PLOW_MCP_BRIDGE_TOKEN: "fixture" },
+    async () => Response.json({ result: { content: [{ type: "text", text: JSON.stringify(value) }] } }));
+  const result = JSON.parse(await mac(receipt).mac(["plow-gog", "calendar", "events", "--json"]));
+  assert.deepEqual(result, receipt); assert.throws(() => parseListing(result, cal, "UTC"), /incomplete/);
+  for (const rejected of [{ ...receipt, status: "pending" }, { ...receipt, degraded: ["offline"] }, {}, { error: "unauthorized" }]) {
+    await assert.rejects(mac(rejected).mac(["plow-gog", "calendar", "events", "--json"]));
+  }
+  assert.throws(() => parseListing({}, cal, "UTC"), /event collection/);
+  assert.throws(() => parseListing({ error: "unavailable" }, cal, "UTC"), /event collection/);
+});
+test("Mac discovery reads a bounded ordered cursor and excludes outgoing, group, SMS, owner and agent messages", async () => {
+  const rows = [
+    { rowid: 10, sender: guest.provider_key, chat_guid: `iMessage;-;${guest.provider_key}`, is_from_me: 0, at: incoming.created_at, body: "Can we meet?" },
+    { rowid: 11, sender: null, chat_guid: `iMessage;-;${guest.provider_key}`, is_from_me: 1, at: incoming.created_at, body: "Already answered" },
+    { rowid: 12, sender: guest.provider_key, chat_guid: "iMessage;+;group", is_from_me: false, at: incoming.created_at, body: "Group conversation" },
+    { rowid: 13, sender: guest.provider_key, chat_guid: `SMS;-;${guest.provider_key}`, is_from_me: false, at: incoming.created_at, body: "SMS" },
+    ...[owner.provider_key, self.line.provider_key].map((sender, i) => ({ rowid: 14 + i, sender, chat_guid: `iMessage;-;${sender}`, is_from_me: false, at: incoming.created_at, body: "Another assistant or owner" })),
+  ];
+  const calls: string[][] = [];
+  const p = provider(api(), async argv => { calls.push(argv); return rows.map(value => JSON.stringify(value)).join("\n"); });
+  const result = await p.archive(9);
+  assert.deepEqual(result.filter(row => row.source).map(row => row.source?.handle), [guest.provider_key]);
+  assert.equal(result.at(-1)?.rowid, 15); assert.deepEqual(calls[0], ["plow-messages", "search", "--order", "asc", "--limit", "50", "--after-rowid", "9"]);
+  await p.archive(null); assert.ok(calls[1]?.includes("desc") && calls[1]?.includes("1") && !calls[1]?.includes("--after-rowid"));
+  const compact: typeof fetch = async input => String(input).endsWith("/agents/me")
+    ? Response.json({ line: self.line, chats: [home, group].map(chat => ({ ...chat, participants: chat.participants.map(person => person.type === "agent" ? { ...person, line: { uid: self.line.uid } } : person) })) }) : api()(input);
+  assert.deepEqual((await provider(compact, async () => rows.map(row => JSON.stringify(row)).join("\n")).archive(9)).filter(row => row.source).map(row => row.source?.handle), [guest.provider_key]);
+});
 
 test("lossless calendar reads preserve the native managed Zoom URL, including its password", () => {
   const zoom = "https://zoom.us/j/123456789?pwd=exact_password";
@@ -112,7 +186,7 @@ test("a supplied iMessage email is researched directly without requiring a Conta
   const calls: string[][] = [];
   const p = provider(api(), async argv => { calls.push(argv); return argv[0] === "plow-messages" ? "" : JSON.stringify({ messages: [] }); });
   await p.research("new@example.test");
-  assert.deepEqual(calls[0]?.slice(0, 4), ["plow-messages", "thread", "--handle", "new@example.test"]);
+  assert.deepEqual(calls[0], ["plow-messages", "search", "--handle", "new@example.test", "--order", "desc", "--limit", "30"]);
   assert.ok(calls.every(argv => !argv.includes("contacts")));
 });
 test("contact research ignores other phone lines and inactive chats instead of rejecting its own served group", async () => {
@@ -158,4 +232,15 @@ test("native iMessage Markdown escapes confirm the same displayed message while 
   assert.equal((await p.send("group", expected)).text, actual);
   assert.equal((await p.recoverSend("group", expected, outgoing.created_at))?.text, actual);
   assert.equal(await provider(api([{ ...outgoing, body: actual.replace("Monday at 9", "Monday at 10") }])).recoverSend("group", expected, outgoing.created_at), null);
+});
+
+test("native Markdown hard breaks recover the existing send without accepting changed scheduling facts", async () => {
+  const actual = "Hi Daniel, Enzo could do:\nMonday, October 5, 2:00 PM GMT-3\nWednesday, October 7, 2:00 PM GMT-3\nJoin: https://meet.google.com/abc-defg-hij";
+  const expected = actual.replace(/\n/g, "  \n");
+  const p = provider(api([{ ...outgoing, body: actual }]));
+  assert.equal((await p.send("group", expected)).text, actual);
+  assert.equal((await p.recoverSend("group", expected, outgoing.created_at))?.text, actual);
+  for (const changed of [actual.replace("2:00", "3:00"), actual.replace("October 5", "October 6"), actual.replace("abc-defg-hij", "abc-defg-xyz")]) {
+    assert.equal(await provider(api([{ ...outgoing, body: changed }])).recoverSend("group", expected, outgoing.created_at), null);
+  }
 });

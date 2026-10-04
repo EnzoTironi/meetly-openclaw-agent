@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { advice, liveHolds, page, preferences, source, type Contact, type Meeting, type Page, type Preferences, type Source } from "./model.ts";
+import { advice, liveHolds, page, preferences, source, sourceKey, type Contact, type Meeting, type Page, type Preferences, type Source } from "./model.ts";
 
 function missing(error: unknown): boolean { return error instanceof Error && "code" in error && error.code === "ENOENT"; }
 // OpenClaw may register separate plugin instances for hooks and tool discovery.
@@ -15,7 +15,11 @@ const queues = shared[queueKey] ??= new Map<string, Promise<unknown>>();
 function atomic(path: string, value: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const temp = `${path}.${randomUUID()}.tmp`;
-  try { writeFileSync(temp, value, { mode: 0o600 }); renameSync(temp, path); }
+  try {
+    writeFileSync(temp, value, { mode: 0o600, flush: true }); renameSync(temp, path);
+    const folder = openSync(dirname(path), "r");
+    try { fsyncSync(folder); } finally { closeSync(folder); }
+  }
   finally { rmSync(temp, { force: true }); }
 }
 
@@ -71,7 +75,8 @@ export class Records {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS operations(key TEXT PRIMARY KEY, input TEXT NOT NULL, state TEXT NOT NULL, receipt TEXT);
       CREATE TABLE IF NOT EXISTS projections(path TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS inbox(key TEXT PRIMARY KEY, body TEXT NOT NULL, handled INTEGER NOT NULL DEFAULT 0);`);
+      CREATE TABLE IF NOT EXISTS inbox(key TEXT PRIMARY KEY, body TEXT NOT NULL, handled INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS cursors(key TEXT PRIMARY KEY, position INTEGER NOT NULL);`);
     this.recoverPages();
   }
   close(): void { this.db.close(); }
@@ -135,22 +140,37 @@ export class Records {
   receive(value: Source): boolean {
     const parsed = source.parse(value);
     return this.db.prepare("INSERT OR IGNORE INTO inbox(key,body) VALUES (?,?)")
-      .run(JSON.stringify([parsed.channel, parsed.thread, parsed.messageId]), JSON.stringify(parsed)).changes > 0;
+      .run(sourceKey(parsed), JSON.stringify(parsed)).changes > 0;
   }
   pendingSources(): Source[] {
     return z.array(z.object({ body: z.string() })).parse(this.db.prepare("SELECT body FROM inbox WHERE handled=0 ORDER BY rowid").all())
       .map(value => source.parse(JSON.parse(value.body)));
   }
   handled(value: Source): void {
-    this.db.prepare("UPDATE inbox SET handled=1 WHERE key=?").run(JSON.stringify([value.channel, value.thread, value.messageId]));
+    this.db.prepare("UPDATE inbox SET handled=1 WHERE key=?").run(sourceKey(value));
   }
   isHandled(value: Source): boolean {
-    const row = this.db.prepare("SELECT handled FROM inbox WHERE key=?").get(JSON.stringify([value.channel, value.thread, value.messageId]));
+    const row = this.db.prepare("SELECT handled FROM inbox WHERE key=?").get(sourceKey(value));
     return row !== undefined && z.object({ handled: z.number() }).parse(row).handled === 1;
   }
   ownerSource(thread: string): Source | null {
     const row = this.db.prepare("SELECT body FROM inbox WHERE json_extract(body,'$.thread')=? AND json_extract(body,'$.owner')=1 ORDER BY rowid DESC LIMIT 1").get(thread);
     return row ? source.parse(JSON.parse(z.object({ body: z.string() }).parse(row).body)) : null;
+  }
+  cursor(): number | null {
+    return z.number().int().nonnegative().nullable().parse(this.db.prepare("SELECT (SELECT position FROM cursors WHERE key='messages') AS position").get()?.position);
+  }
+  advanceCursor(position: number): void {
+    this.db.prepare("INSERT INTO cursors(key,position) VALUES ('messages',?) ON CONFLICT(key) DO UPDATE SET position=max(position,excluded.position)").run(position);
+  }
+  async capture(value: Source): Promise<void> {
+    if (value.channel !== "messages" || value.owner) throw new Error("Discovery requires an incoming Mac receipt.");
+    await this.effect(`discovery:${sourceKey(value)}`, value, source, { run: async () => value, retry: "safe" });
+    this.receive(value);
+  }
+  isDiscovered(value: Source): boolean {
+    const receipt = this.operation(`discovery:${sourceKey(value)}`);
+    return value.channel === "messages" && !value.owner && receipt?.state === "confirmed" && receipt.receipt === JSON.stringify(source.parse(value));
   }
   uncertain(): string[] { return this.unfinished().map(value => value.key); }
   operation(key: string): z.infer<typeof operationRow> | null {

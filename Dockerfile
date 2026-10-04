@@ -2,9 +2,9 @@
 FROM public.ecr.aws/e1h7x4a2/plow-cloud-agents:base-cc708dd8534f9c7686be4223713570c16e5ad006@sha256:1cf8e57ec949f8077329927da47df4215620605cdd987bbd4bb36eaa5147da06
 
 USER root
-# Native extension installation and delivery helpers, proposed upstream.
+# Native extension installation, delivery helpers and group silence, proposed upstream.
 # Remove this pinned patch when a published Plow base includes the commit.
-ADD --checksum=sha256:e0ec1e53130ab30ccde3fe04aa9ef4ea272e2e7e8b0c8df9427ee2e451ef6a36 https://github.com/EnzoTironi/zoen-plow/commit/596954a68a4a593fd6380eafcdac471c89eca9cc.patch /tmp/plow-native.patch
+ADD --checksum=sha256:18c093c02db06cdfd2d8fa850e0b61b90392815dcc7d3e29e6d2910a59e3c18e https://github.com/EnzoTironi/zoen-plow/compare/cc708dd8534f9c7686be4223713570c16e5ad006...e778c5191922c9ca5fa3695753d9624a881fd5ff.patch /tmp/plow-native.patch
 RUN git -C /opt/plow apply --include='boot/*.ts' --include='plugin/*.ts' --include='build.ts' /tmp/plow-native.patch \
     && node /opt/plow/build.ts && rm /tmp/plow-native.patch
 

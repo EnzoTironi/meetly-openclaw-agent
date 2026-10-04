@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export class DecisionRequired extends Error {}
+
 const text = z.string().trim().min(1).max(10_000);
 export const id = z.string().min(1).max(512);
 export const instant = z.iso.datetime({ offset: true });
@@ -14,6 +16,7 @@ const zone = text.refine(value => {
 }, "Use an IANA timezone");
 const clock = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 export const day = z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+const meal = z.enum(["lunch", "dinner", "coffee"]);
 export const zoomUrl = z.url().refine(value => /^https:\/\/(?:[a-z0-9-]+\.)?zoom\.us\/(?:j|my)\/[A-Za-z0-9_.-]+(?:\?pwd=[A-Za-z0-9._-]+)?$/.test(value), "Use a Zoom meeting URL");
 
 export const video = z.discriminatedUnion("kind", [
@@ -28,14 +31,17 @@ export const preferences = z.object({
   ownerName: text, timezone: zone, calendar,
   busyCalendars: z.array(calendar).min(1),
   video: video.nullable(),
-  durations: z.object({ video: duration, in_person: duration, phone: duration })
-    .default({ video: 30, in_person: 60, phone: 30 }),
+  durations: z.object({ video: duration, in_person: duration, phone: duration,
+    lunch: duration.default(60), dinner: duration.default(60), coffee: duration.default(30) })
+    .default({ video: 30, in_person: 60, phone: 30, lunch: 60, dinner: 60, coffee: 30 }),
   travelMin: z.number().int().min(0).max(180).default(30),
   hours: z.object({ days: z.array(day).min(1), from: clock, to: clock })
     .refine(value => value.from < value.to, "Working hours must end after they start")
     .default({ days: ["mon", "tue", "wed", "thu", "fri"], from: "09:00", to: "18:00" }),
   noticeMin: z.number().int().min(0).max(10_080).default(120),
   monitorMin: z.number().int().min(1).max(60).default(5),
+  reminderMin: z.number().int().min(0).max(60).default(10),
+  defaultFormat: z.enum(["video", "in_person", "phone"]).nullable().default(null),
   paused: z.boolean().default(false),
   movableTitles: z.array(text).default([]),
 });
@@ -49,29 +55,33 @@ export const source = z.object({
 });
 export type Source = z.infer<typeof source>;
 export type Actor = { kind: "owner"; source: Source; mainDm: boolean; hostContext: object }
-  | { kind: "guest"; source: Source } | { kind: "maintenance" };
-export const contact = z.object({ name: text, handle });
+  | { kind: "guest"; source: Source } | { kind: "discovery"; source: Source } | { kind: "maintenance" };
+export const contact = z.object({ name: text, handle, language: text.optional() });
 export type Contact = z.infer<typeof contact>;
 
-const detailsBase = { topic: text, attendees: z.array(email).min(1).max(20), durationMin: duration, timezone: zone };
+const detailsBase = { topic: text, attendees: z.array(email).min(1).max(20), durationMin: duration, timezone: zone, meal: meal.optional() };
 export const details = z.discriminatedUnion("kind", [
   z.object({ ...detailsBase, kind: z.literal("video"), video }),
   z.object({ ...detailsBase, kind: z.literal("in_person"), location: text, travelMin: z.number().int().min(0).max(180) }),
   z.object({ ...detailsBase, kind: z.literal("phone"), phone: handle }),
 ]);
 export type Details = z.infer<typeof details>;
-const requestBase = { topic: text, attendees: z.array(email).min(1).max(20), durationMin: duration.nullable().default(null) };
+const requestBase = { topic: text, attendees: z.array(email).min(1).max(20), durationMin: duration.nullable().default(null), meal: meal.optional() };
 export const requestDetails = z.discriminatedUnion("kind", [
   z.object({ ...requestBase, kind: z.literal("video") }),
   z.object({ ...requestBase, kind: z.literal("in_person"), location: text }),
   z.object({ ...requestBase, kind: z.literal("phone"), phone: handle }),
 ]);
-export const range = z.object({ from: instant, to: instant })
+export const range = z.object({ from: instant, to: instant,
+  days: z.array(day).min(1).max(7).optional(), after: clock.optional(), before: clock.optional(), near: instant.optional() })
+  .refine(value => !value.after || !value.before || value.after < value.before, "Daily hours must end after they start")
   .refine(value => Date.parse(value.to) > Date.parse(value.from), "The search range must end after it starts")
   .refine(value => Date.parse(value.to) - Date.parse(value.from) <= 60 * 86_400_000, "Search at most 60 days at a time");
 export type Range = z.infer<typeof range>;
 export const eventRef = z.object({ calendar, id });
 export type EventRef = z.infer<typeof eventRef>;
+export const permissions = z.object({ outsideHours: z.boolean().default(false), conflicts: z.array(eventRef).max(20).default([]) });
+export type Permissions = z.infer<typeof permissions>;
 export const slot = z.object({ start: instant, durationMin: duration, meeting: eventRef, travel: z.array(eventRef).max(2) });
 export type Slot = z.infer<typeof slot>;
 export const proposal = z.object({ revision: z.number().int().positive(), slots: z.tuple([slot, slot, slot]), expiresAt: instant });
@@ -96,7 +106,7 @@ const common = {
   origin: z.enum(["owner", "external"]), cleanup: z.array(eventRef), reserved: z.array(eventRef).default([]),
   proposed: sentProposal.nullable(),
 };
-const ready = { ...common, details, range, nextRevision: z.number().int().positive() };
+const ready = { ...common, details, range, ownerRange: range.optional(), nextRevision: z.number().int().positive(), permissions: permissions.default({ outsideHours: false, conflicts: [] }) };
 export const meeting = z.discriminatedUnion("status", [
   z.object({ ...common, status: z.literal("new") }),
   z.object({ ...common, status: z.literal("waiting_on_us"), question: text }),
@@ -120,13 +130,13 @@ export const command = z.discriminatedUnion("action", [
   z.object({ action: z.literal("status") }),
   z.object({ action: z.literal("remember"), preferences }),
   z.object({ action: z.literal("research"), query: text }),
-  z.object({ action: z.literal("prepare"), contact, details: requestDetails, range, source: z.object({ thread: id, messageId: id }).optional() }),
+  z.object({ action: z.literal("prepare"), contact, details: requestDetails, range, permissions: permissions.optional(), source: z.object({ thread: id, messageId: id }).optional() }),
   z.object({ action: z.literal("ask"), contact, question: text, source: z.object({ thread: id, messageId: id }).optional() }),
   z.object({ action: z.literal("approve"), ...revision }),
   z.object({ action: z.literal("publish"), ...revision }),
   z.object({ action: z.literal("choose"), ...revision, option: z.number().int().min(1).max(3) }),
-  z.object({ action: z.literal("repropose"), ...revision, range }),
-  z.object({ action: z.literal("move"), ...addressed, start: instant }),
+  z.object({ action: z.literal("repropose"), ...revision, range, permissions: permissions.optional() }),
+  z.object({ action: z.literal("move"), ...addressed, start: instant, permissions: permissions.optional() }),
   z.object({ action: z.literal("cancel"), ...addressed }),
   z.object({ action: z.literal("reply"), ...addressed, text }),
   z.object({ action: z.literal("repair"), ...addressed, zoomUrl: zoomUrl.optional() }),
@@ -147,6 +157,16 @@ export function liveHolds(value: Meeting): EventRef[] {
 }
 
 export function refKey(ref: EventRef): string { return JSON.stringify([ref.calendar.account, ref.calendar.id, ref.id]); }
+export function sourceKey(value: Source): string { return JSON.stringify([value.channel, value.thread, value.messageId]); }
+
+export function publicContext(value: Meeting): Record<string, unknown> {
+  return { id: value.id, status: value.status, contact: value.contact, requestedRange: "range" in value ? value.range : null,
+    revision: "proposal" in value ? value.proposal.revision : value.proposed?.revision ?? null,
+    sent: value.proposed ? { text: value.proposed.text, revision: value.proposed.revision, options: value.proposed.slots.map((slot, index) => ({ option: index + 1, start: slot.start, durationMin: slot.durationMin })) } : null,
+    details: "details" in value ? { ...value.details, ...(value.details.kind === "video" ? { video: { kind: value.details.video.kind } } : {}) } : null,
+    booked: value.status === "confirmed" ? { start: value.invitation.event.start, end: value.invitation.event.end,
+      attendees: value.invitation.event.attendees, link: value.details.kind === "video" ? value.invitation.event.conference || value.invitation.event.location : null } : null };
+}
 
 export function advice(value: Meeting): string {
   if (value.cleanup.length) return "Verify and remove the remaining recorded holds or travel blocks.";
@@ -167,7 +187,10 @@ export function assertOwner(actor: Actor, privateOnly = false): asserts actor is
 }
 
 export function assertParticipant(actor: Actor, value: Meeting): void {
-  if (actor.kind === "owner") return;
+  if (actor.kind === "owner") {
+    if (!actor.mainDm && actor.source.thread !== (value.proposed?.thread ?? value.source.thread)) throw new Error("This meeting belongs to another conversation. Continue privately.");
+    return;
+  }
   if (actor.kind !== "guest" || actor.source.handle !== value.contact.handle || actor.source.thread !== value.proposed?.thread) {
     throw new Error("This reply does not belong to the meeting's authenticated contact and conversation.");
   }
