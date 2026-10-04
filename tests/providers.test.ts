@@ -29,6 +29,32 @@ test("a served group derives exactly one guest from the roster and rejects mixed
   const extra = { ...guest, uid: "other", provider_key: "other@example.test" };
   await assert.rejects(provider(async input => String(input).endsWith("/agents/me") ? api()(input) : Response.json({ ...group, participants: [...group.participants, extra] })).groupContact("group"), /single verified/);
 });
+test("initial calendar discovery uses permitted calendar reads and retains each connected account", async () => {
+  const calls: string[][] = [], primary = { id: cal.account, primary: true, timeZone: "America/Sao_Paulo" };
+  const p = provider(api(), async argv => {
+    calls.push(argv);
+    if (argv[0] === "readlink") throw new Error("Mac timezone unavailable");
+    assert.deepEqual(argv, ["plow-gog", "calendar", "calendars", "--json"]);
+    return JSON.stringify({ items: [primary, { id: "shared", account: "work@example.test" }] });
+  });
+  const discovery = await p.discover() as { timezone: string; video: null; calendars: { account: string; listing: { calendars: unknown[] } }[] };
+  assert.equal(discovery.timezone, primary.timeZone); assert.equal(discovery.video, null);
+  assert.deepEqual(discovery.calendars.map(value => value.account), [cal.account, "work@example.test"]);
+  assert.ok(discovery.calendars.every(value => value.listing.calendars.length === 1));
+  assert.ok(!calls.some(argv => argv[1] === "auth"));
+});
+test("Latch structured read receipts require completion, preserve pagination and reject degraded or unknown data", async () => {
+  const receipt = { status: "completed", degraded: [], items: [raw], nextPageToken: "more" };
+  const mac = (value: unknown) => new Providers(native, () => "UTC", { ...env, PLOW_MCP_BRIDGE_TOKEN: "fixture" },
+    async () => Response.json({ result: { content: [{ type: "text", text: JSON.stringify(value) }] } }));
+  const result = JSON.parse(await mac(receipt).mac(["plow-gog", "calendar", "events", "--json"]));
+  assert.deepEqual(result, receipt); assert.throws(() => parseListing(result, cal, "UTC"), /incomplete/);
+  for (const rejected of [{ ...receipt, status: "pending" }, { ...receipt, degraded: ["offline"] }, {}, { error: "unauthorized" }]) {
+    await assert.rejects(mac(rejected).mac(["plow-gog", "calendar", "events", "--json"]));
+  }
+  assert.throws(() => parseListing({}, cal, "UTC"), /event collection/);
+  assert.throws(() => parseListing({ error: "unavailable" }, cal, "UTC"), /event collection/);
+});
 test("Mac discovery reads a bounded ordered cursor and excludes outgoing, group, SMS, owner and agent messages", async () => {
   const rows = [
     { rowid: 10, sender: guest.provider_key, chat_guid: `iMessage;-;${guest.provider_key}`, is_from_me: 0, at: incoming.created_at, body: "Can we meet?" },

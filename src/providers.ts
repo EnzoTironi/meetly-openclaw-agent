@@ -42,7 +42,7 @@ const rawListing = z.union([z.array(rawEvent), z.object({
   items: z.array(rawEvent).optional(), events: z.array(rawEvent).optional(),
   nextPageToken: z.string().optional(), has_more: z.boolean().optional(),
   degraded: z.array(z.unknown()).default([]), truncated: z.unknown().optional(),
-})]);
+}).refine(value => value.items !== undefined || value.events !== undefined, "Calendar read did not verify an event collection.")]);
 
 export function jsonOutput(output: string): unknown {
   const at = output.search(/^[{[]/m);
@@ -287,10 +287,13 @@ export class Providers implements Ports {
     const identity = z.object({ chats: z.array(chat) }).parse(await this.request("/agents/me"));
     const owner = identity.chats.flatMap(value => value.participants).find(value => value.type === "member" && value.role === "owner");
     const timezone = await this.mac(["readlink", "/etc/localtime"], ["/etc/localtime"]).then(value => /zoneinfo\/(.+?)\s*$/.exec(value)?.[1] ?? null).catch(() => null);
-    const accounts = z.object({ accounts: z.array(z.object({ email })) }).parse(jsonOutput(await this.mac(["plow-gog", "auth", "list", "--json"])));
-    const calendars = await Promise.all(accounts.accounts.map(async value => ({ account: value.email,
-      listing: jsonOutput(await this.mac(["plow-gog", "calendar", "calendars", "--account", value.email, "--json"])) })));
-    return { ownerName: owner?.type === "member" ? owner.display_name ?? null : null, timezone, calendars, video: null,
+    const listing = z.object({ calendars: z.unknown().optional(), items: z.unknown().optional() })
+      .parse(jsonOutput(await this.mac(["plow-gog", "calendar", "calendars", "--json"])));
+    const values = z.array(z.object({ id: z.string(), account: email.optional(), primary: z.boolean().optional(), timeZone: z.string().optional() }).passthrough())
+      .parse(listing.calendars ?? listing.items);
+    const primary = values.find(value => value.primary), accounts = [...new Set(values.map(value => email.parse(value.account ?? primary?.id)))];
+    const calendars = accounts.map(account => ({ account, listing: { calendars: values.filter(value => (value.account ?? primary?.id) === account) } }));
+    return { ownerName: owner?.type === "member" ? owner.display_name ?? null : null, timezone: timezone ?? primary?.timeZone ?? null, calendars, video: null,
       note: "Read selected calendars and saved preferences before asking. Ask the owner privately once for the video provider and Zoom room mode. Plow Latch must be connected." };
   }
 }
@@ -309,7 +312,8 @@ async function runMac(argv: string[], readPaths: string[] = [], env: NodeJS.Proc
   if (reply.result.isError) throw new RejectedEffect("Latch refused this operation.");
   const result = reply.result.content.find(value => value.type === "text")?.text;
   if (!result) throw new Error("Latch did not return a command receipt.");
-  const command = z.object({ exit_code: z.number(), output: z.string() }).parse(JSON.parse(result));
-  if (command.exit_code !== 0) throw new Error(`Latch command failed: ${command.output.slice(0, 500)}`);
-  return command.output;
+  const decoded: unknown = JSON.parse(result), command = z.object({ exit_code: z.number(), output: z.string() }).safeParse(decoded);
+  if (!command.success) return JSON.stringify(z.object({ status: z.literal("completed"), degraded: z.array(z.unknown()).max(0), items: z.array(z.unknown()) }).passthrough().parse(decoded));
+  if (command.data.exit_code !== 0) throw new Error(`Latch command failed: ${command.data.output.slice(0, 500)}`);
+  return command.data.output;
 }
