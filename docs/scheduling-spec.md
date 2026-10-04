@@ -20,7 +20,7 @@ never from a name or a claim inside a message.
 | One contact wiki | `records.ts` retains a stable contact page with exact IDs, sent receipts, advisory `next_step` and dated prose. Tests cover renamed contacts and interrupted page writes. |
 | Remember preferences | Owner-confirmed provider, room mode, durations, travel and explicit link steps are stored under `entities/owner`. Tests cover all three video modes, zero travel, current buffers on move, remembered default format and link preservation on move. |
 | Write as assistant | Model instructions require third-person owner wording. Validate the actual model's outgoing text in the integration and iMessage runs. |
-| Natural guest conversation | The LLM answers ordinary questions in the guest's thread from verified attendees and links. Owner-gated requests get a model-written acknowledgement. Booking and move notices include the link automatically. |
+| Natural guest conversation | The LLM addresses the guest in the meeting group, using the latest verified guest language before remembered language. Ordinary questions use verified attendees and links. Owner reports, questions and decisions stay in the private owner conversation even after a group request. Booking and move notices include the link automatically. Native hook tests prevent framework commentary or owner acknowledgements from leaking publicly. |
 | Find answers first / private clarification | Context research precedes missing-detail questions. Fixtures cover an email-only contact, missing provider and the origin of private owner questions. |
 | Reveal no personal reasons | Guest context contains its meeting and sent options, not busy-event titles, other contacts or credentials. Adversarial model tests exercise owner impersonation and private calendar requests. |
 
@@ -93,8 +93,12 @@ contact. Keep `AGENT_ID` empty. Label all meetings as tests.
    requests, pause, do-not-contact and unrelated-conversation isolation. Check
    reminders once, with model-written text and no stale outreach after a reply.
 9. Schedule directly in the existing group. Confirm no duplicate group is
-   opened and external approval still goes privately to the owner. Change
-   the travel buffer, move an in-person meeting and verify both new blocks.
+   opened and external approval still goes privately to the owner. Use
+   different owner and guest languages. The public proposal must address
+   the guest in their language, with one option per line; the owner's report
+   must arrive privately. Change the guest's language and verify it takes
+   precedence over history. Change the travel buffer, move an in-person
+   meeting and verify both new blocks.
 10. Discover a new direct Mac request. Verify private approval precedes any
     public times. Replay the Lívia household message and an owner-answered
     message: neither may create a meeting or outreach. Check a join reminder
@@ -105,8 +109,9 @@ Messages/calendar runs are distinct evidence. Only the last proves delivery
 through the real iMessage path. Attach their visual evidence to the PR using
 `gh --attach`; keep traces, credentials and generated reports outside Git.
 
-The current feature pass typechecks and passes 104 behavior tests. Its 40
-recorded native model scenarios use simulated connectors: M01–M23 cover
+The current code typechecks and passes 108 behavior tests. The earlier
+feature pass recorded 40 distinct native model outcomes with simulated
+connectors: M01–M23 cover
 the scheduling contract, guest questions, video modes, privacy and delivery;
 N01–N17 cover groups, travel changes, live links, scoped exceptions, defaults,
 Mac discovery, the real periodic join-reminder timer, and verified structured
@@ -114,10 +119,33 @@ Latch read receipts. Calendar discovery uses permitted calendar reads and
 preserves each connected account; degraded, unrecognized or incomplete
 calendar data cannot become free time. The natural final
 cancellation also verifies all new fixture meetings and recorded holds are
-closed. Failed attempts remain in the attached evidence with their fixes.
+closed. Seven fresh native cases G01–G07 pass on the group-language correction:
+Portuguese owner with an English guest, the guest changing language,
+natural guest choice with a verified link, and cancellation with every test
+ID absent, the owner's group choice without duplicate private confirmation,
+guest questions about email and link in two languages, and cancellation
+after a language change. The model identifies language from an isolated
+recipient cue before interpreting or writing facts. An owner booking and
+its host final share one durable private receipt; a behavior test also
+verifies deduplication after restart. Their exact public/private texts and
+receipts are attached. The
+earlier 40 cases were not rerun after this correction. Failed attempts
+remain visible with their fixes.
 
-A new physical Messages interaction is blocked by AppleEvent timeout
-`-1712`. Prior real iMessage evidence is labeled with its earlier release.
-Connected Zoom creation and an actual elapsed 24-hour reminder have not been
-physically accepted. The native service remains responsible for scheduling
+The Mac timeout was resolved. The [fresh real iMessage journey](https://github.com/EnzoTironi/meetly-openclaw-agent/pull/2#issuecomment-5979166570)
+starts with an ordinary owner request in the existing Daniel group, without
+language, private-routing or link instructions. Proposal, booking, move and
+cancellation each deliver one English guest message and one Portuguese
+private owner report. Independent calendar reads verify all three initial
+holds, the invitation with Daniel's email and Google Meet, and both sibling
+deletions. The move preserves the same event ID and link, with the new time
+verified independently. Final cancellation leaves status `passed`, no live
+holds, cleanup IDs or unfinished operations, and all 12 exact test IDs absent.
+These are owner-authorized choices, not Daniel's RSVP. Failed physical language
+attempts and duplicate private confirmation remain attached beside the
+correction. A new genuine guest reply, connected Zoom creation and an actual
+elapsed 24-hour reminder have not been physically accepted. The [seven fresh
+native cases](https://github.com/EnzoTironi/meetly-openclaw-agent/pull/2#issuecomment-5979061578)
+exercise guest choices, email/link questions and language changes with
+simulated connectors. The native service remains responsible for scheduling
 monitoring; the separate OpenClaw heartbeat is disabled during deployment.

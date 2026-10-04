@@ -79,8 +79,12 @@ Guests use a tool-free model turn scoped to their meeting. The workflow
 checks authority, current proposals, availability and provider receipts.
 Every outgoing message is drafted by the configured model; its draft is
 saved before sending so recovery cannot generate a different duplicate.
-Guests receive answers in their own thread. Booking confirmations and time
-updates include the verified video link without a separate owner request.
+Guests receive answers in their meeting group, in the guest's language.
+The latest verified guest message takes precedence over older language
+preferences. Owner reports, questions and decisions go to the private owner
+conversation, including when the owner requested the meeting in the group.
+Booking confirmations and time updates include the verified video link
+without a separate owner request.
 
 The owner's preferences and video-link steps live at
 `entities/owner/scheduling.md`. Each contact has one page at
