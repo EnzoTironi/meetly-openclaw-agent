@@ -57,6 +57,11 @@ export class Inbound {
   async conversation(input: Source): Promise<{ current: Meeting | undefined; context: unknown; unavailable: boolean } | null> {
     let current = this.app.records.contact(input.handle)?.meetings.filter(value => (value.proposed?.thread ?? value.source.thread) === input.thread && ["held", "sent", "waiting_on_them", "confirmed"].includes(value.status))
       .toSorted((a, b) => Date.parse(b.proposed?.at ?? b.createdAt) - Date.parse(a.proposed?.at ?? a.createdAt) || Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+    if (current?.status === "confirmed") {
+      try { await this.app.reviewInvitation(current); current = this.app.records.find(current.id); }
+      catch { return { current, unavailable: true, context: { status: "unverified", contact: current.contact, booked: null,
+        note: "The current calendar facts are unavailable. Explain naturally that you are checking, without repeating a cached time, attendee or link." } }; }
+    }
     if (current) return { current, context: publicContext(current), unavailable: false };
     const prefs = this.app.records.owner(), research = await this.app.ports.research(input.handle, prefs?.calendar);
     return { current, unavailable: false, context: { preferences: { defaultFormat: prefs?.defaultFormat, durations: prefs?.durations }, research } };

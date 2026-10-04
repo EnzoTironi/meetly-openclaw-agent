@@ -36,6 +36,7 @@ export const preferences = z.object({
     .default({ days: ["mon", "tue", "wed", "thu", "fri"], from: "09:00", to: "18:00" }),
   noticeMin: z.number().int().min(0).max(10_080).default(120),
   monitorMin: z.number().int().min(1).max(60).default(5),
+  reminderMin: z.number().int().min(0).max(60).default(10),
   defaultFormat: z.enum(["video", "in_person", "phone"]).nullable().default(null),
   paused: z.boolean().default(false),
   movableTitles: z.array(text).default([]),

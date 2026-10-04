@@ -529,7 +529,7 @@ export class Scheduling {
     if (notify) await this.publicNotice(value, "cancel", `The meeting with ${this.preferences().ownerName} has been cancelled.`);
     return cleaned;
   }
-  async publicNotice(value: Meeting, reason: string, facts: unknown): Promise<void> {
+  async publicNotice(value: Meeting, reason: string, facts: unknown, beforeSend?: () => Promise<void>): Promise<void> {
     if (!value.proposed || value.status === "do_not_contact") return;
     const thread = value.proposed.thread, key = `${value.id}/${reason}-notice`;
     if ((await this.ports.groupContact(thread)).handle !== value.contact.handle) throw new Error("The meeting conversation no longer has its verified contact; resolve it privately.");
@@ -538,7 +538,7 @@ export class Scheduling {
         timezone: value.details.timezone, attendees: value.invitation.event.attendees,
         link: value.details.kind === "video" ? value.invitation.event.conference || value.invitation.event.location : null } : null });
     const receipt = await this.records.effect(key, { thread, text }, delivery, {
-      run: () => this.ports.send(thread, text), recover: () => this.ports.recoverSend(thread, text, value.proposed!.at),
+      run: async () => { await beforeSend?.(); return this.ports.send(thread, text); }, recover: () => this.ports.recoverSend(thread, text, value.proposed!.at),
     });
     if (!this.records.operation(`${key}-log`)) {
       this.records.save(this.records.find(value.id), `The inbox verified the ${reason} notice ${receipt.messageId}. An invitation is not an RSVP acceptance.`);
@@ -566,7 +566,7 @@ export class Scheduling {
   async reconcile(): Promise<{ pending: number; failures: string[] }> {
     this.records.recoverPages();
     const failures: string[] = [];
-    for (const saved of this.records.unfinished()) await this.check(() => this.recoverHold(saved), failures);
+    for (const saved of this.records.unfinished()) await this.check(async () => { await this.recoverHold(saved); await this.recoverNotice(saved); }, failures);
     for (const raw of this.records.pendingTasks()) await this.check(() => this.resumeTask(raw), failures);
     for (const value of this.records.pages().flatMap(page => page.meetings)) await this.check(() => this.reviewMeeting(value), failures);
     if (failures.length) await this.reportFailures(failures);
@@ -637,7 +637,31 @@ export class Scheduling {
     await this.cleanup(value.id);
     await this.nudge(this.records.find(value.id));
   }
+  async recoverNotice(saved: { key: string; input: unknown }): Promise<void> {
+    if (!/(?:-notice$|\/notice\/|^reply:|^monitor:)/.test(saved.key)) return;
+    const input = z.object({ thread: z.string(), text: z.string() }).safeParse(saved.input);
+    if (!input.success) return;
+    await this.records.effect(saved.key, saved.input, delivery, {
+      run: async () => { throw new Error("Check this message's delivery receipt before another send."); },
+      recover: () => this.ports.recoverSend(input.data.thread, input.data.text, new Date(0).toISOString()),
+    });
+  }
+  async joinReminder(value: Confirmed): Promise<void> {
+    const minutes = (Date.parse(value.invitation.event.start) - this.now()) / 60_000;
+    if (value.details.kind !== "video" || !this.preferences().reminderMin || minutes < -5 || minutes > this.preferences().reminderMin) return;
+    await this.publicNotice(value, `join/${hash(value.invitation.event.start)}`, {
+      purpose: "Remind the attendees of this verified video meeting and include its join link.", minutesToStart: Math.max(0, Math.ceil(minutes)),
+    }, async () => {
+      const current = this.records.find(value.id), prefs = this.preferences();
+      const at = (Date.parse(value.invitation.event.start) - this.now()) / 60_000;
+      const observed = await this.ports.read(value.invitation.event.ref);
+      if (prefs.paused || !prefs.reminderMin || at < -5 || at > prefs.reminderMin || current.status !== "confirmed"
+        || JSON.stringify(observed) !== JSON.stringify(value.invitation.event)) throw new RejectedEffect("The meeting reminder is no longer current; do not send it.");
+    });
+  }
   async nudge(value: Meeting): Promise<void> {
+    if (this.preferences().paused) return;
+    if (value.status === "confirmed") await this.joinReminder(value);
     const age = this.now() - Date.parse(value.updatedAt);
     if (age >= 4 * 3_600_000 && (value.status === "waiting_on_us" || value.status === "held")) {
       const reason = value.status === "held" ? String(value.proposal.revision) : hash(value.question);
@@ -674,6 +698,13 @@ export class Scheduling {
     }
     const conference = value.details.kind === "video" && value.details.video.kind === "zoom_personal" ? value.details.video.url : value.invitation.event.conference || value.invitation.event.location;
     assertInvitation(observed, value.details, { start: observed.start, durationMin: value.details.durationMin }, conference);
+    if (JSON.stringify(observed) !== JSON.stringify(value.invitation.event)) {
+      const next: Confirmed = { ...value, invitation: { ...value.invitation, event: observed }, updatedAt: iso(this.now()) };
+      this.records.save(next, `The calendar verified the current invitation facts for ${observed.ref.id}.`);
+      if (value.details.kind === "video" && observed.conference !== value.invitation.event.conference) {
+        await this.publicNotice(next, `link/${hash(observed.conference)}`, { purpose: "Tell the attendees the calendar verified an updated meeting link." });
+      }
+    }
   }
   async calendarChange(value: Confirmed, observed: Event): Promise<void> {
     const durationMin = (Date.parse(observed.end) - Date.parse(observed.start)) / 60_000;
@@ -698,5 +729,6 @@ export class Scheduling {
     this.records.save(meeting.parse({ ...current, details: info, invitation: { ...value.invitation, event: observed, travel }, cleanup: [...current.cleanup, ...value.invitation.travel], reserved: current.reserved.filter(ref => !keys.has(refKey(ref))), updatedAt: iso(this.now()) }), `The calendar verified a changed invitation ${observed.ref.id}; reconcile its recorded travel blocks.`);
     await this.cleanup(value.id);
     await this.privateNotice(this.records.find(value.id), `changed:${hash(observed)}`, `The calendar changed ${info.topic} with ${value.contact.name} to ${label(observed.start, info.timezone)}. Its invitation and travel blocks are now verified.`);
+    await this.publicNotice(this.records.find(value.id), `move/${hash(observed.start)}`, { purpose: "Tell the attendees the calendar verified a changed meeting time and include the current invitation link." });
   }
 }

@@ -754,3 +754,64 @@ test("in-person rescheduling uses current travel preferences, including enabling
   const final = meeting.parse(await f.app.run({ action: "move", meetingId: booked.id, start: "2026-10-09T12:00:00Z" }, owner));
   assert.equal(final.status, "confirmed"); assert.equal(f.ports.events.size, 1); assert.equal(liveHolds(final).length, 0);
 });
+
+test("a verified same-time Meet link change reaches the guest's own thread and their natural answer", async t => {
+  const f = fixture(t), booked = await f.choose(await f.sent()); assert.equal(booked.status, "confirmed"); if (booked.status !== "confirmed") return;
+  const link = "https://meet.google.com/xyz-wxyz-uvw";
+  f.ports.events.set(refKey(booked.invitation.event.ref), { ...booked.invitation.event, conference: link });
+  const input = source.parse({ ...guestSource, messageId: "new-link-question", text: "What's the meeting link?" });
+  f.records.receive(input);
+  const inbound = new Inbound(f.app, async message => {
+    const context = JSON.parse(message).context;
+    assert.equal(context.booked.link, link);
+    return JSON.stringify({ action: "reply", evidence: input.text, text: `Here's the current link: ${link}` });
+  });
+  await inbound.handle(input);
+  const saved = f.records.find(booked.id); assert.equal(saved.status === "confirmed" && saved.invitation.event.conference, link);
+  assert.equal(f.ports.messages.at(-1)?.text, `Here's the current link: ${link}`); assert.equal(f.ports.messages.at(-1)?.thread, "group");
+});
+
+test("join reminders are drafted by the LLM with the verified link, once per booked time, and survive a lost receipt", async t => {
+  const f = fixture(t), booked = await f.choose(await f.sent()); assert.equal(booked.status, "confirmed");
+  f.advance(50 * 60_000);
+  let drafts = 0;
+  const app = new Scheduling(f.records, f.ports, async context => {
+    const facts = context as { invitation: { link: string }; facts: { purpose: string } };
+    assert.match(facts.facts.purpose, /Remind/); assert.equal(facts.invitation.link, "https://meet.google.com/abc-defg-hij");
+    drafts++; return `Sam's meeting starts soon. Join here: ${facts.invitation.link}`;
+  }, () => now + 50 * 60_000);
+  f.ports.loseSend = true;
+  await assert.rejects(app.nudge(booked));
+  f.ports.loseSend = false;
+  assert.deepEqual((await app.reconcile()).failures, []);
+  await app.nudge(f.records.find(booked.id));
+  assert.equal(drafts, 1); assert.equal(f.ports.messages.filter(message => /starts soon/.test(message.text)).length, 1);
+  assert.equal(f.records.uncertain().length, 0);
+});
+
+test("paused, cancelled and late meetings do not send join reminders", async t => {
+  const f = fixture(t), booked = await f.choose(await f.sent());
+  const before = f.ports.messages.length;
+  f.records.remember(preferences.parse({ ...prefs, paused: true }), ownerSource);
+  f.advance(50 * 60_000); await f.app.nudge(booked); assert.equal(f.ports.messages.length, before);
+  f.records.remember(prefs, ownerSource); f.advance(20 * 60_000); await f.app.nudge(booked); assert.equal(f.ports.messages.length, before);
+  const app = new Scheduling(f.records, f.ports, async () => {
+    assert.equal(booked.status, "confirmed"); if (booked.status === "confirmed") f.ports.events.delete(refKey(booked.invitation.event.ref));
+    return "This draft cannot be sent after cancellation.";
+  }, () => now + 50 * 60_000);
+  await assert.rejects(app.nudge(booked), RejectedEffect);
+  assert.equal(f.ports.messages.length, before);
+});
+
+test("an unavailable calendar gets a natural guest acknowledgement and a private check, never a cached link", async t => {
+  const f = fixture(t), booked = await f.choose(await f.sent());
+  t.mock.method(f.ports, "read", async () => { throw new Error("calendar offline"); });
+  const input = source.parse({ ...guestSource, messageId: "offline-link", text: "Could I get the link?" }); f.records.receive(input);
+  const inbound = new Inbound(f.app, async message => {
+    assert.equal(JSON.parse(message).context.booked, null);
+    return JSON.stringify({ action: "reply", evidence: input.text, text: "I'm checking the current invitation and will get back to you." });
+  });
+  await inbound.handle(input);
+  assert.equal(f.ports.messages.at(-1)?.thread, "group"); assert.ok(!f.ports.messages.at(-1)?.text.includes("meet.google.com"));
+  assert.equal(f.records.find(booked.id).status, "confirmed");
+});

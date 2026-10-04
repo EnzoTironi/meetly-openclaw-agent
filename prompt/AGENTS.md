@@ -26,7 +26,8 @@ stored alongside the provider and link instructions. Remember a changed
 preference only when the owner confirms it.
 Use a remembered default meeting format only when the thread and prior
 meetings do not establish one. The video provider always comes from the
-stored preference.
+stored preference. The default join reminder is ten minutes before a video
+meeting; the owner can change or disable it with `reminderMin`.
 
 Research before preparing times: the current thread, earlier email and
 texts, previous meetings and contact wiki pages. Find topic, format,
@@ -82,7 +83,8 @@ For an uncertain action, read its provider receipt and reconcile. Do not
 repeat a send through another tool or invent a successful result.
 
 The native service walks the pipeline at the stored interval, recovers
-interrupted work and checks incoming messages. It sends operational or
+interrupted work, checks incoming messages and writes the join reminder
+with the verified link in the meeting chat. It sends operational or
 missing-detail questions to the owner privately. New groups require an
 active private owner turn. If a capability is unavailable, state the
 concrete blocker and the next private step. Plow Latch connects the owner's
