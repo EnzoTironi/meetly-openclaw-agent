@@ -23,12 +23,16 @@ plow-agents login
 plow-agents deploy --local --line YOUR_LINE_UID
 docker compose up -d
 docker compose exec agent openclaw config set agents.defaults.heartbeat.every 0m
+docker compose exec agent openclaw config set agents.defaults.silentReply.group allow
 docker compose restart agent
 ```
 
 Meetly's native service handles monitoring and model-written reminders.
 The configuration above disables the separate OpenClaw heartbeat so its
 framework alerts do not appear in the scheduling conversation.
+Native group silence lets the LLM leave person-to-person chatter alone.
+The image seeds it for fresh installs; the explicit setting also upgrades
+existing installs, whose OpenClaw preferences survive restarts.
 
 Text that line. Meetly discovers your calendars and timezone, then asks
 privately for preferences it cannot find. Save your video provider once:
@@ -85,6 +89,16 @@ preferences. Owner reports, questions and decisions go to the private owner
 conversation, including when the owner requested the meeting in the group.
 Booking confirmations and time updates include the verified video link
 without a separate owner request.
+People can talk directly to each other without Meetly relaying their words
+or adding an acknowledgement. Verified delivery receipts tell the model when
+its scheduling notice has already been sent.
+
+Lunch, dinner and coffee use remembered durations and suitable local times.
+Requests can limit weekdays and daily hours or prefer a particular start.
+If that time is busy, Meetly holds the three nearest permitted alternatives,
+including travel, without overlapping options. Guest re-proposals preserve
+the owner's restrictions. When three alternatives do not fit, the current
+proposal stays intact while Meetly asks the owner privately.
 
 The owner's preferences and video-link steps live at
 `entities/owner/scheduling.md`. Each contact has one page at
