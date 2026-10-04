@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calendar, eventRef, source } from "../src/model.ts";
+import { calendar, details, eventRef, preferences, slot, source } from "../src/model.ts";
 import { parseEvent, parseListing, Providers, type NativeChannel } from "../src/providers.ts";
+import { movableBlock } from "../src/availability.ts";
+import { verifyBooked } from "../src/invitation.ts";
 
 const cal = calendar.parse({ account: "sam@example.test", id: "primary" });
 const range = { from: "2026-10-05T08:00:00Z", to: "2026-10-16T20:00:00Z" };
@@ -22,6 +24,27 @@ const api = (messages = [incoming, outgoing]): typeof fetch => async input => {
   if (url.includes("/messages?")) return Response.json({ data: messages, has_more: false });
   return Response.json(url.endsWith("/owner") ? home : group);
 };
+
+test("quoted Google event text supports permitted priorities and the owner's exact personal Zoom URL", async () => {
+  const quoted = (value: string) => `<<<EXTERNAL_UNTRUSTED_CONTENT id="calendar-read">>>\nSource: google_api\n---\n${value}\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="calendar-read">>>`;
+  const ref = eventRef.parse({ calendar: cal, id: raw.id });
+  const read = (value: object) => provider(api(), async () => JSON.stringify(value)).read(ref);
+  const block = await read({ ...raw, summary: quoted("Prayer time"), attendees: [], creator: { email: cal.account } });
+  assert.ok(block);
+  const prefs = preferences.parse({ ownerName: "Sam", timezone: "UTC", calendar: cal, busyCalendars: [cal], video: null, movableTitles: ["Prayer time"] });
+  assert.equal(movableBlock(block, prefs, Date.parse("2026-10-04T08:00:00Z")), true);
+  const unproven = await read({ ...raw, summary: quoted("Prayer time"), attendees: [], creator: { email: "collaborator@example.test" } });
+  assert.ok(unproven); assert.equal(movableBlock(unproven, prefs, Date.parse("2026-10-04T08:00:00Z")), false);
+  const url = "https://zoom.us/my/sam", observed = await read({ ...raw, location: quoted(url), summary: quoted("Project review") });
+  assert.ok(observed);
+  const booking = { details: details.parse({ topic: "Project review", kind: "video", video: { kind: "zoom_personal", url }, attendees: [guest.provider_key], timezone: "UTC", durationMin: 30 }),
+    chosen: slot.parse({ meeting: ref, start: observed.start, durationMin: 30, travel: [] }), marker: "booking", previous: null };
+  assert.equal(verifyBooked(observed, booking).event.location, url);
+  for (const location of [quoted(url).replace('id="calendar-read">>>', 'id="different">>>'), quoted(url).replace("Source: google_api", "Source: other")]) {
+    const rejected = await read({ ...raw, location });
+    assert.ok(rejected); assert.throws(() => verifyBooked(rejected, booking));
+  }
+});
 
 test("a served group derives exactly one guest from the roster and rejects mixed-contact groups", async () => {
   assert.equal((await provider(api()).groupContact("group")).handle, guest.provider_key);

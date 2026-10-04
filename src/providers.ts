@@ -26,12 +26,13 @@ export interface Ports {
   discover(): Promise<unknown>;
 }
 
+const calendarText = z.string().transform(value => value.replace(/^<<<EXTERNAL_UNTRUSTED_CONTENT id="([^"]+)">>>\nSource: google_api\n---\n([\s\S]*)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="\1">>>$/, "$2"));
 const rawStamp = z.union([z.string(), z.object({ dateTime: z.string().optional(), date: z.string().optional() })]);
 const rawEvent = z.object({
   id, status: z.enum(["confirmed", "tentative", "cancelled"]).default("confirmed"),
   start: rawStamp.optional(), end: rawStamp.optional(), startLocal: z.string().optional(), endLocal: z.string().optional(),
-  summary: z.string().default(""), location: z.string().default(""), hangoutLink: z.string().optional(),
-  description: z.string().default(""),
+  summary: calendarText.default(""), location: calendarText.default(""), hangoutLink: z.string().optional(),
+  description: calendarText.default(""),
   conferenceData: z.object({ entryPoints: z.array(z.object({ entryPointType: z.string(), uri: z.string() })).optional() }).optional(),
   attendees: z.array(z.object({ email, self: z.boolean().optional(), responseStatus: z.string().optional() })).default([]),
   extendedProperties: z.object({ private: z.record(z.string(), z.string()).optional() }).optional(),
