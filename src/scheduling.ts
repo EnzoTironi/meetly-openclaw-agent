@@ -491,7 +491,9 @@ export class Scheduling {
     if (value.status !== "confirmed") throw new Error("Only a verified booked meeting can be moved.");
     if (Date.parse(value.invitation.event.start) === Date.parse(start)) return this.finishMove(value);
     const marker = `${id}/move/${hash(start)}`, prefs = this.preferences();
-    const info = value.details;
+    const info = await this.records.effect(`${marker}/details`, { start }, details, {
+      run: async () => value.details.kind === "in_person" ? { ...value.details, travelMin: prefs.travelMin } : value.details, retry: "safe",
+    });
     const candidate = { start, durationMin: info.durationMin };
     const spans = windows(candidate, info), range = { from: spans.map(span => span.start).sort()[0] ?? start, to: spans.map(span => span.end).sort().at(-1) ?? endOf(candidate) };
     const busy = await this.ports.list(prefs.busyCalendars, range);
@@ -675,11 +677,13 @@ export class Scheduling {
   }
   async calendarChange(value: Confirmed, observed: Event): Promise<void> {
     const durationMin = (Date.parse(observed.end) - Date.parse(observed.start)) / 60_000;
-    const info = details.parse({ ...value.details, durationMin });
+    const marker = `${value.id}/move/${hash([observed.start, observed.end])}`;
+    const info = await this.records.effect(`${marker}/details`, { start: observed.start, end: observed.end }, details, {
+      run: async () => details.parse({ ...value.details, durationMin, ...(value.details.kind === "in_person" ? { travelMin: this.preferences().travelMin } : {}) }), retry: "safe",
+    });
     const conference = info.kind === "video" && info.video.kind === "zoom_personal" ? info.video.url : value.invitation.event.conference || value.invitation.event.location;
     assertInvitation(observed, info, { start: observed.start, durationMin }, conference);
     let travel: EventRef[] = [];
-    const marker = `${value.id}/move/${hash([observed.start, observed.end])}`;
     const spans = windows({ start: observed.start, durationMin }, info);
     const range = { from: spans.map(span => span.start).sort()[0]!, to: spans.map(span => span.end).sort().at(-1)! };
     if (info.kind === "in_person") {

@@ -739,3 +739,18 @@ test("private drafting separates the owner's language sample from this guest's a
   await new Inbound(f.app, async () => assert.fail("Only the actual private draft is tested here")).defer(booked, input, "Please approve the guest's move privately.");
   assert.equal(f.ports.messages.at(-1)?.thread, "owner");
 });
+
+test("in-person rescheduling uses current travel preferences, including enabling and disabling travel", async t => {
+  const f = fixture(t);
+  f.records.remember(preferences.parse({ ...prefs, travelMin: 0 }), ownerSource);
+  const booked = await f.choose(await f.sent(false, "in_person")); assert.equal(booked.status, "confirmed");
+  f.records.remember(preferences.parse({ ...prefs, travelMin: 45 }), ownerSource);
+  const moved = meeting.parse(await f.app.run({ action: "move", meetingId: booked.id, start: "2026-10-08T12:00:00Z" }, owner));
+  assert.equal(moved.status, "confirmed"); if (moved.status !== "confirmed") return;
+  assert.equal(moved.details.kind === "in_person" && moved.details.travelMin, 45);
+  assert.equal(moved.invitation.travel.length, 2); assert.equal(f.ports.events.size, 3);
+  for (const ref of moved.invitation.travel) { const span = await f.ports.read(ref); assert.ok(span); assert.equal(Date.parse(span.end) - Date.parse(span.start), 45 * 60_000); }
+  f.records.remember(preferences.parse({ ...prefs, travelMin: 0 }), ownerSource);
+  const final = meeting.parse(await f.app.run({ action: "move", meetingId: booked.id, start: "2026-10-09T12:00:00Z" }, owner));
+  assert.equal(final.status, "confirmed"); assert.equal(f.ports.events.size, 1); assert.equal(liveHolds(final).length, 0);
+});

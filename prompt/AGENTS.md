@@ -72,7 +72,7 @@ attendee and the stored preferred video link. An invitation is not an RSVP.
 The workflow records that event before removing every sibling hold and
 travel block. Read returned cleanup references before claiming cleanup is
 complete. Moves preserve the event ID and video link and rebuild travel
-using its recorded buffer;
+using the current stored buffer;
 cancellation removes the meeting and its recorded travel blocks.
 
 The contact wiki is confirmed state. `proposed` is the exact sent text and

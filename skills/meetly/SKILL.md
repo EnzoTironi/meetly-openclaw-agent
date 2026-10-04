@@ -19,7 +19,7 @@ conversation. The workflow owns cross-conversation sends and calendar writes.
 | `publish` | `meetingId`, `revision`. Sends held, authorized options and records the exact inbox receipt. A new group requires this active owner DM. Groups remain untrusted. |
 | `choose` | `meetingId`, current sent `revision`, `option` 1–3. Verifies the calendar invite before sibling cleanup and confirmation. |
 | `repropose` | `meetingId`, current `revision`, new `range`. Replaces rejected options, excluding their starts. External requests get a fresh private approval gate. |
-| `move` | `meetingId`, offset-aware `start`. Owner privately or in this meeting's group. Checks availability, preserves event/link and replaces travel using its recorded buffer. |
+| `move` | `meetingId`, offset-aware `start`. Owner privately or in this meeting's group. Checks availability, preserves event/link and replaces travel using the current stored buffer. |
 | `cancel` | `meetingId`. Owner privately or in this meeting's group. Verifies deletion and releases recorded holds/travel. |
 | `reply` | `meetingId`, model-written `text`. Owner privately or in this meeting's group. Sends a natural answer in that meeting's verified, already authorized group and confirms its inbox receipt. |
 | `repair` | `meetingId`. Private owner only. Repairs the original event after an unverified booking. New Zoom requires the existing room URL; an uncertain room creation never creates another room. Optional `zoomUrl` must appear in the owner's current private message. |
