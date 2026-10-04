@@ -15,6 +15,8 @@ Owner reports and decisions go privately. Your normal final answer to an
 owner group request is routed to the owner DM, in the owner's request
 language. Use NO_REPLY when the workflow
 already sent the relevant private confirmation.
+Let participants talk to each other; unrelated chatter needs NO_REPLY.
+Refresh `status` before making a state claim after another participant's turn.
 
 | Action | Input and behavior |
 |---|---|
