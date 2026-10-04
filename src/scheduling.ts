@@ -7,7 +7,7 @@ import { invitationWrite, verifyBooked } from "./invitation.ts";
 import { Records, RejectedEffect } from "./records.ts";
 import { writeEvent, type Ports, type WriteEvent } from "./providers.ts";
 
-const task = z.object({ command, authority: z.object({ kind: z.enum(["owner", "guest"]), source, mainDm: z.boolean() }) });
+const task = z.object({ command, authority: z.object({ kind: z.enum(["owner", "guest", "discovery"]), source, mainDm: z.boolean() }) });
 const threeCandidates = z.tuple([z.object({ start: z.string(), durationMin: z.number() }), z.object({ start: z.string(), durationMin: z.number() }), z.object({ start: z.string(), durationMin: z.number() })]);
 const availabilityPlan = z.object({ slots: threeCandidates, moves: z.array(z.object({ event, start: z.string(), end: z.string() })) });
 class DecisionRequired extends Error {}
@@ -91,6 +91,10 @@ export class Scheduling {
   }
   async authorize(input: Command, actor: Actor): Promise<void> {
     if ("permissions" in input && input.permissions) assertOwner(actor);
+    if (actor.kind === "discovery") {
+      if (!this.records.isDiscovered(actor.source) || !(input.action === "ask" || input.action === "prepare")) throw new RejectedEffect("Mac discovery can only prepare this sender's privately gated request from a verified receipt.");
+      return this.authorizeRequest(input, actor);
+    }
     if (actor.kind === "owner" && !actor.mainDm) await this.authorizeGroup(input, actor);
     if (actor.kind === "guest" && actor.source.channel !== "plow") throw new RejectedEffect("Mac messages are research context, not authenticated Meetly requests.");
     if (input.action === "prepare" || input.action === "ask") this.authorizeRequest(input, actor);
@@ -98,7 +102,7 @@ export class Scheduling {
     else this.authorizePrivate(input, actor);
   }
   authorizeRequest(input: Extract<Command, { action: "prepare" | "ask" }>, actor: Actor): void {
-    if (actor.kind === "guest") {
+    if (actor.kind === "guest" || actor.kind === "discovery") {
       if (input.source || input.contact.handle !== actor.source.handle) throw new Error("A sender can only initiate their own authenticated request.");
     } else assertOwner(actor);
     if (this.records.contact(input.contact.handle)?.meetings.some(value => value.status === "do_not_contact")) throw new Error("Do not contact: the owner blocked this contact.");
@@ -179,7 +183,7 @@ export class Scheduling {
   }
   async evidence(input: { contact: { handle: string }; source?: { thread: string; messageId: string } }, actor: Actor): Promise<Source> {
     let verified: Source;
-    if ((actor.kind === "guest") && !input.source) verified = actor.source;
+    if ((actor.kind === "guest" || actor.kind === "discovery") && !input.source) verified = actor.source;
     else { assertOwner(actor, Boolean(input.source)); verified = input.source ? await this.ports.message(input.source.thread, input.source.messageId) : actor.source; }
     if (!verified.owner && verified.handle !== input.contact.handle) throw new RejectedEffect("The source contact does not match this scheduling request.");
     const active = this.records.contact(input.contact.handle)?.meetings.find(value => ["new", "waiting_on_us", "held", "sent", "waiting_on_them"].includes(value.status));
@@ -596,6 +600,15 @@ export class Scheduling {
     const refs = closedStatuses.has(value.status) ? { cleanup: [...value.cleanup, observed.ref] } : { reserved: [...value.reserved, observed.ref] };
     this.records.save(meeting.parse({ ...value, ...refs, updatedAt: iso(this.now()) }), `The calendar recovered interrupted hold or travel block ${observed.ref.id}.`);
   }
+  async recoverNotice(saved: { key: string; input: unknown }): Promise<void> {
+    if (!/(?:-notice$|\/notice\/|^reply:|^monitor:)/.test(saved.key)) return;
+    const input = z.object({ thread: z.string(), text: z.string() }).safeParse(saved.input);
+    if (!input.success) return;
+    await this.records.effect(saved.key, saved.input, delivery, {
+      run: async () => { throw new Error("Check this message's delivery receipt before another send."); },
+      recover: () => this.ports.recoverSend(input.data.thread, input.data.text, new Date(0).toISOString()),
+    });
+  }
   async resumeTask(raw: unknown): Promise<void> {
     const saved = task.parse(raw);
     const actor = this.restoredActor(saved.authority);
@@ -615,6 +628,7 @@ export class Scheduling {
     catch (error) { if (error instanceof RejectedEffect) this.records.reject(`task:${hash(saved)}`); else throw error; }
   }
   restoredActor(authority: z.infer<typeof task>["authority"]): Actor | null {
+    if (authority.kind === "discovery") return this.records.isDiscovered(authority.source) ? { kind: "discovery", source: authority.source } : null;
     if (authority.source.channel !== "plow") return null;
     return authority.kind === "guest" ? { kind: "guest", source: authority.source }
       : { kind: "owner", source: authority.source, mainDm: authority.mainDm, hostContext: {} };
@@ -637,28 +651,6 @@ export class Scheduling {
     await this.cleanup(value.id);
     await this.nudge(this.records.find(value.id));
   }
-  async recoverNotice(saved: { key: string; input: unknown }): Promise<void> {
-    if (!/(?:-notice$|\/notice\/|^reply:|^monitor:)/.test(saved.key)) return;
-    const input = z.object({ thread: z.string(), text: z.string() }).safeParse(saved.input);
-    if (!input.success) return;
-    await this.records.effect(saved.key, saved.input, delivery, {
-      run: async () => { throw new Error("Check this message's delivery receipt before another send."); },
-      recover: () => this.ports.recoverSend(input.data.thread, input.data.text, new Date(0).toISOString()),
-    });
-  }
-  async joinReminder(value: Confirmed): Promise<void> {
-    const minutes = (Date.parse(value.invitation.event.start) - this.now()) / 60_000;
-    if (value.details.kind !== "video" || !this.preferences().reminderMin || minutes < -5 || minutes > this.preferences().reminderMin) return;
-    await this.publicNotice(value, `join/${hash(value.invitation.event.start)}`, {
-      purpose: "Remind the attendees of this verified video meeting and include its join link.", minutesToStart: Math.max(0, Math.ceil(minutes)),
-    }, async () => {
-      const current = this.records.find(value.id), prefs = this.preferences();
-      const at = (Date.parse(value.invitation.event.start) - this.now()) / 60_000;
-      const observed = await this.ports.read(value.invitation.event.ref);
-      if (prefs.paused || !prefs.reminderMin || at < -5 || at > prefs.reminderMin || current.status !== "confirmed"
-        || JSON.stringify(observed) !== JSON.stringify(value.invitation.event)) throw new RejectedEffect("The meeting reminder is no longer current; do not send it.");
-    });
-  }
   async nudge(value: Meeting): Promise<void> {
     if (this.preferences().paused) return;
     if (value.status === "confirmed") await this.joinReminder(value);
@@ -676,6 +668,19 @@ export class Scheduling {
       await this.verifyHolds(value, remaining);
       await this.publicNotice(value, `r${value.proposed.revision}/followup`, `Would any of the remaining proposed times with ${this.preferences().ownerName} work for you? If none do, I can find new options.`);
     }
+  }
+  async joinReminder(value: Confirmed): Promise<void> {
+    const minutes = (Date.parse(value.invitation.event.start) - this.now()) / 60_000;
+    if (value.details.kind !== "video" || !this.preferences().reminderMin || minutes < -5 || minutes > this.preferences().reminderMin) return;
+    await this.publicNotice(value, `join/${hash(value.invitation.event.start)}`, {
+      purpose: "Remind the attendees of this verified video meeting and include its join link.", minutesToStart: Math.max(0, Math.ceil(minutes)),
+    }, async () => {
+      const current = this.records.find(value.id), prefs = this.preferences();
+      const at = (Date.parse(value.invitation.event.start) - this.now()) / 60_000;
+      const observed = await this.ports.read(value.invitation.event.ref);
+      if (prefs.paused || !prefs.reminderMin || at < -5 || at > prefs.reminderMin || current.status !== "confirmed"
+        || JSON.stringify(observed) !== JSON.stringify(value.invitation.event)) throw new RejectedEffect("The meeting reminder is no longer current; do not send it.");
+    });
   }
   async expire(value: Held | Offered): Promise<void> {
     const expired = meeting.parse({ ...value, status: "passed", reserved: [], cleanup: liveHolds(value), updatedAt: iso(this.now()) });

@@ -83,6 +83,7 @@ class CalendarFixture implements Ports {
   async replies(): Promise<Source[]> { return []; }
   async research(): Promise<unknown> { return { texts: [], mail: [] }; }
   async discover(): Promise<unknown> { return {}; }
+  async archive(): Promise<{ rowid: number; source: Source | null }[]> { return []; }
 }
 
 function fixture(t: TestContext) {
@@ -653,7 +654,6 @@ test("the owner schedules naturally inside the contact's served group, without o
   await f.app.run({ action: "cancel", meetingId: booked.id }, actor);
   assert.equal(f.ports.events.size, 0);
 });
-
 test("group ownership cannot access other contacts, approve external options, or alter owner preferences", async t => {
   const f = fixture(t);
   const privateRoom = "https://zoom.us/my/private-owner-room";
@@ -675,71 +675,6 @@ test("group ownership cannot access other contacts, approve external options, or
   assert.ok(replacement.proposal.slots.every(slot => !result.includes(slot.start))); assert.ok(!result.includes('"source"'));
   assert.equal(replacement.approval, "required"); assert.equal(f.ports.messages.filter(value => value.thread === "group").length, 1);
 });
-
-test("owner exceptions stay local to one three-option proposal and guests cannot grant them", async t => {
-  const f = fixture(t), evening = { from: "2026-10-10T20:00:00Z", to: "2026-10-11T02:00:00Z" };
-  const allowed = { outsideHours: true, conflicts: [] };
-  await assert.rejects(f.app.run({ ...prepare, range: evening, permissions: allowed }, guest));
-  assert.equal(f.ports.events.size, 0);
-  const held = meeting.parse(await f.app.run({ ...prepare, range: evening, permissions: allowed }, owner));
-  assert.equal(held.status, "held"); if (held.status !== "held") return;
-  assert.equal(held.proposal.slots.length, 3); assert.equal(held.permissions.outsideHours, true);
-  const sent = meeting.parse(await f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner));
-  assert.equal((await f.choose(sent)).status, "confirmed"); assert.deepEqual(f.records.owner()?.hours, prefs.hours);
-});
-
-test("an overlap exception covers only the owner's exact event ID and leaves that event unchanged", async t => {
-  const f = fixture(t), blocked = event.parse({ ref: { calendar: prefs.calendar, id: "personal-block" }, status: "confirmed", start: range.from, end: range.to,
-    title: "Private reason", location: "", attendees: [], conference: "", transparent: false, declined: false, marker: "" });
-  f.ports.events.set(refKey(blocked.ref), blocked);
-  const held = meeting.parse(await f.app.run({ ...prepare, permissions: { conflicts: [blocked.ref] } }, owner));
-  assert.equal(held.status, "held"); if (held.status !== "held") return;
-  const extra = { ...blocked, ref: { ...blocked.ref, id: "new-conflict" } }; f.ports.events.set(refKey(extra.ref), extra);
-  await assert.rejects(f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner), /no longer available/);
-  assert.deepEqual(f.ports.events.get(refKey(blocked.ref)), blocked); assert.equal(f.ports.messages.length, 0);
-});
-
-test("a new source cannot re-point an active contact request into another chat or inherit owner-origin authority", async t => {
-  const f = fixture(t), held = await f.held(), before = f.records.uncertain();
-  await assert.rejects(f.app.run(prepare, { kind: "guest", source: { ...guestSource, thread: "other-group" } }), /another conversation/);
-  assert.deepEqual(f.records.uncertain(), before); assert.equal(f.records.find(held.id).source.thread, "owner");
-  assert.equal(f.ports.events.size, 3); assert.equal(f.ports.messages.length, 0);
-});
-
-test("a changed group roster cannot receive a booking notice or join link for the former contact", async t => {
-  const f = fixture(t), booked = await f.choose(await f.sent());
-  const before = f.ports.messages.length;
-  t.mock.method(f.ports, "groupContact", async () => ({ name: "Someone else", handle: "other@example.test" }));
-  await assert.rejects(f.app.publicNotice(booked, "fresh-link", "Verified invitation"), /verified contact/);
-  assert.equal(f.ports.messages.length, before);
-});
-
-test("a definitively rejected cross-group request is answered naturally, deferred privately and removed from retries", async t => {
-  const f = fixture(t), held = await f.held();
-  const input = source.parse({ ...guestSource, thread: "other-group", messageId: "cross-group-request" }); f.records.receive(input);
-  const inbound = new Inbound(f.app, async () => JSON.stringify({ action: "request", name: "Taylor", details: prepare.details, range, question: null,
-    evidence: input.text, text: "I'll check with Sam about this request." }));
-  await inbound.handle(input);
-  assert.equal(f.records.isHandled(input), true); assert.equal(f.records.uncertain().length, 0);
-  assert.equal(f.records.find(held.id).source.thread, "owner"); assert.equal(f.ports.events.size, 3);
-  assert.equal(f.ports.messages.at(-1)?.thread, "other-group"); assert.equal(f.ports.messages.at(-1)?.text, "I'll check with Sam about this request.");
-  assert.ok(f.ports.messages.some(message => message.thread === "owner"));
-});
-
-test("private drafting separates the owner's language sample from this guest's actual request and origin", async t => {
-  const f = fixture(t), booked = await f.choose(await f.sent());
-  const old = source.parse({ ...ownerSource, messageId: "unrelated-owner-turn", text: "Cancele outra reunião com Quinn." }); f.records.receive(old);
-  const input = source.parse({ ...guestSource, messageId: "guest-change", text: "Could we move our meeting to Friday afternoon?" });
-  t.mock.method(f.app, "compose", async (context: unknown) => {
-    const value = context as { languageSample: string; request: { origin: string; message: string }; conversation?: unknown };
-    assert.equal(value.languageSample, old.text); assert.equal(value.request.origin, "external"); assert.equal(value.request.message, input.text);
-    assert.equal(value.conversation, undefined);
-    return "Taylor asked to move this meeting. Can we change it?";
-  });
-  await new Inbound(f.app, async () => assert.fail("Only the actual private draft is tested here")).defer(booked, input, "Please approve the guest's move privately.");
-  assert.equal(f.ports.messages.at(-1)?.thread, "owner");
-});
-
 test("in-person rescheduling uses current travel preferences, including enabling and disabling travel", async t => {
   const f = fixture(t);
   f.records.remember(preferences.parse({ ...prefs, travelMin: 0 }), ownerSource);
@@ -754,7 +689,6 @@ test("in-person rescheduling uses current travel preferences, including enabling
   const final = meeting.parse(await f.app.run({ action: "move", meetingId: booked.id, start: "2026-10-09T12:00:00Z" }, owner));
   assert.equal(final.status, "confirmed"); assert.equal(f.ports.events.size, 1); assert.equal(liveHolds(final).length, 0);
 });
-
 test("a verified same-time Meet link change reaches the guest's own thread and their natural answer", async t => {
   const f = fixture(t), booked = await f.choose(await f.sent()); assert.equal(booked.status, "confirmed"); if (booked.status !== "confirmed") return;
   const link = "https://meet.google.com/xyz-wxyz-uvw";
@@ -770,7 +704,6 @@ test("a verified same-time Meet link change reaches the guest's own thread and t
   const saved = f.records.find(booked.id); assert.equal(saved.status === "confirmed" && saved.invitation.event.conference, link);
   assert.equal(f.ports.messages.at(-1)?.text, `Here's the current link: ${link}`); assert.equal(f.ports.messages.at(-1)?.thread, "group");
 });
-
 test("join reminders are drafted by the LLM with the verified link, once per booked time, and survive a lost receipt", async t => {
   const f = fixture(t), booked = await f.choose(await f.sent()); assert.equal(booked.status, "confirmed");
   f.advance(50 * 60_000);
@@ -788,7 +721,6 @@ test("join reminders are drafted by the LLM with the verified link, once per boo
   assert.equal(drafts, 1); assert.equal(f.ports.messages.filter(message => /starts soon/.test(message.text)).length, 1);
   assert.equal(f.records.uncertain().length, 0);
 });
-
 test("paused, cancelled and late meetings do not send join reminders", async t => {
   const f = fixture(t), booked = await f.choose(await f.sent());
   const before = f.ports.messages.length;
@@ -802,7 +734,6 @@ test("paused, cancelled and late meetings do not send join reminders", async t =
   await assert.rejects(app.nudge(booked), RejectedEffect);
   assert.equal(f.ports.messages.length, before);
 });
-
 test("an unavailable calendar gets a natural guest acknowledgement and a private check, never a cached link", async t => {
   const f = fixture(t), booked = await f.choose(await f.sent());
   t.mock.method(f.ports, "read", async () => { throw new Error("calendar offline"); });
@@ -814,4 +745,107 @@ test("an unavailable calendar gets a natural guest acknowledgement and a private
   await inbound.handle(input);
   assert.equal(f.ports.messages.at(-1)?.thread, "group"); assert.ok(!f.ports.messages.at(-1)?.text.includes("meet.google.com"));
   assert.equal(f.records.find(booked.id).status, "confirmed");
+});
+test("owner exceptions stay local to one three-option proposal and guests cannot grant them", async t => {
+  const f = fixture(t), evening = { from: "2026-10-10T20:00:00Z", to: "2026-10-11T02:00:00Z" };
+  const allowed = { outsideHours: true, conflicts: [] };
+  await assert.rejects(f.app.run({ ...prepare, range: evening, permissions: allowed }, guest));
+  assert.equal(f.ports.events.size, 0);
+  const held = meeting.parse(await f.app.run({ ...prepare, range: evening, permissions: allowed }, owner));
+  assert.equal(held.status, "held"); if (held.status !== "held") return;
+  assert.equal(held.proposal.slots.length, 3); assert.equal(held.permissions.outsideHours, true);
+  const sent = meeting.parse(await f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner));
+  assert.equal((await f.choose(sent)).status, "confirmed"); assert.deepEqual(f.records.owner()?.hours, prefs.hours);
+});
+test("an overlap exception covers only the owner's exact event ID and leaves that event unchanged", async t => {
+  const f = fixture(t), blocked = event.parse({ ref: { calendar: prefs.calendar, id: "personal-block" }, status: "confirmed", start: range.from, end: range.to,
+    title: "Private reason", location: "", attendees: [], conference: "", transparent: false, declined: false, marker: "" });
+  f.ports.events.set(refKey(blocked.ref), blocked);
+  const held = meeting.parse(await f.app.run({ ...prepare, permissions: { conflicts: [blocked.ref] } }, owner));
+  assert.equal(held.status, "held"); if (held.status !== "held") return;
+  const extra = { ...blocked, ref: { ...blocked.ref, id: "new-conflict" } }; f.ports.events.set(refKey(extra.ref), extra);
+  await assert.rejects(f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner), /no longer available/);
+  assert.deepEqual(f.ports.events.get(refKey(blocked.ref)), blocked); assert.equal(f.ports.messages.length, 0);
+});
+test("verified Mac discovery prepares exactly three holds, keeps every time private, and only private owner approval publishes", async t => {
+  const f = fixture(t), input = source.parse({ ...guestSource, channel: "messages", thread: "iMessage;-;taylor@example.test", messageId: "100" });
+  await f.records.capture(input);
+  const inbound = new Inbound(f.app, async () => JSON.stringify({ action: "request", name: "Taylor", details: prepare.details, range, question: null, text: "I'll check with Sam.", evidence: input.text }));
+  await inbound.handle(input);
+  const held = f.records.contact(input.handle)?.meetings[0]; assert.equal(held?.status, "held"); if (held?.status !== "held") return;
+  assert.equal(held.origin, "external"); assert.equal(held.approval, "required"); assert.equal(f.ports.events.size, 3);
+  assert.ok(f.ports.messages.every(message => message.thread === "owner"));
+  await assert.rejects(f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, { kind: "discovery", source: input }));
+  assert.equal(meeting.parse(await f.app.run({ action: "approve", meetingId: held.id, revision: 1 }, owner)).status, "sent");
+  assert.equal(f.ports.messages.at(-1)?.thread, "group");
+});
+test("Mac discovery ignores household replies, other-assistant tasks and messages the owner already answered", async t => {
+  const f = fixture(t), input = source.parse({ ...guestSource, channel: "messages", thread: "iMessage;-;taylor@example.test", messageId: "100", text: "Claro! Vou informar à Lívia que não há uma lista compartilhada e enviar a página Casa & Corpo." });
+  await f.records.capture(input);
+  const inbound = new Inbound(f.app, async () => JSON.stringify({ action: "reply", text: "This household task is unrelated.", evidence: input.text }));
+  await inbound.handle(input); assert.equal(f.ports.events.size, 0); assert.equal(f.ports.messages.length, 0);
+  const request = source.parse({ ...input, messageId: "102", text: guestSource.text }); await f.records.capture(request);
+  t.mock.method(f.ports, "research", async () => ({ texts: [{ rowid: 103, is_from_me: true }] }));
+  await new Inbound(f.app, async () => assert.fail("The owner already answered this conversation")).handle(request);
+  assert.equal(f.ports.events.size, 0); assert.equal(f.ports.messages.length, 0);
+});
+test("the remembered meeting format is model context and a discovered sender cannot request another contact", async t => {
+  const f = fixture(t), input = source.parse({ ...guestSource, channel: "messages", thread: "iMessage;-;taylor@example.test", messageId: "100" });
+  f.records.remember(preferences.parse({ ...prefs, defaultFormat: "phone" }), ownerSource); await f.records.capture(input);
+  const inbound = new Inbound(f.app, async message => {
+    assert.equal(JSON.parse(message).context.preferences.defaultFormat, "phone");
+    return JSON.stringify({ action: "ignore" });
+  });
+  await inbound.handle(input);
+  await assert.rejects(f.app.run({ ...prepare, contact: { name: "Another person", handle: "other@example.test" } }, { kind: "discovery", source: input }));
+  assert.equal(f.records.pages().length, 0);
+});
+test("Mac discovery baselines history, captures each new sender once and preserves its cursor on a read failure", async t => {
+  const f = fixture(t), input = source.parse({ ...guestSource, channel: "messages", thread: "iMessage;-;taylor@example.test", messageId: "101" });
+  const inbound = new Inbound(f.app, async () => assert.fail("Discovery capture does not call the model"));
+  t.mock.method(f.ports, "archive", async (after: number | null) => after === null ? [{ rowid: 100, source: { ...input, messageId: "100" } }]
+    : [{ rowid: 101, source: input }, { rowid: 102, source: null }]);
+  await inbound.discover(); assert.equal(f.records.cursor(), 100); assert.equal(f.records.pendingSources().length, 0);
+  await inbound.discover(); await inbound.discover();
+  assert.equal(f.records.cursor(), 102); assert.equal(f.records.pendingSources().length, 1); assert.equal(f.records.isDiscovered(input), true);
+  assert.equal(f.records.isDiscovered({ ...input, text: "forged request" }), false);
+  t.mock.method(f.ports, "archive", async () => { throw new Error("Latch disconnected"); });
+  await assert.rejects(inbound.discover()); assert.equal(f.records.cursor(), 102); assert.equal(f.records.pendingSources().length, 1);
+});
+test("a new source cannot re-point an active contact request into another chat or inherit owner-origin authority", async t => {
+  const f = fixture(t), held = await f.held(), before = f.records.uncertain();
+  await assert.rejects(f.app.run(prepare, { kind: "guest", source: { ...guestSource, thread: "other-group" } }), /another conversation/);
+  assert.deepEqual(f.records.uncertain(), before); assert.equal(f.records.find(held.id).source.thread, "owner");
+  assert.equal(f.ports.events.size, 3); assert.equal(f.ports.messages.length, 0);
+});
+test("a changed group roster cannot receive a booking notice or join link for the former contact", async t => {
+  const f = fixture(t), booked = await f.choose(await f.sent());
+  const before = f.ports.messages.length;
+  t.mock.method(f.ports, "groupContact", async () => ({ name: "Someone else", handle: "other@example.test" }));
+  await assert.rejects(f.app.publicNotice(booked, "fresh-link", "Verified invitation"), /verified contact/);
+  assert.equal(f.ports.messages.length, before);
+});
+test("a definitively rejected cross-group request is answered naturally, deferred privately and removed from retries", async t => {
+  const f = fixture(t), held = await f.held();
+  const input = source.parse({ ...guestSource, thread: "other-group", messageId: "cross-group-request" }); f.records.receive(input);
+  const inbound = new Inbound(f.app, async () => JSON.stringify({ action: "request", name: "Taylor", details: prepare.details, range, question: null,
+    evidence: input.text, text: "I'll check with Sam about this request." }));
+  await inbound.handle(input);
+  assert.equal(f.records.isHandled(input), true); assert.equal(f.records.uncertain().length, 0);
+  assert.equal(f.records.find(held.id).source.thread, "owner"); assert.equal(f.ports.events.size, 3);
+  assert.equal(f.ports.messages.at(-1)?.thread, "other-group"); assert.equal(f.ports.messages.at(-1)?.text, "I'll check with Sam about this request.");
+  assert.ok(f.ports.messages.some(message => message.thread === "owner"));
+});
+test("private drafting separates the owner's language sample from this guest's actual request and origin", async t => {
+  const f = fixture(t), booked = await f.choose(await f.sent());
+  const old = source.parse({ ...ownerSource, messageId: "unrelated-owner-turn", text: "Cancele outra reunião com Quinn." }); f.records.receive(old);
+  const input = source.parse({ ...guestSource, messageId: "guest-change", text: "Could we move our meeting to Friday afternoon?" });
+  t.mock.method(f.app, "compose", async (context: unknown) => {
+    const value = context as { languageSample: string; request: { origin: string; message: string }; conversation?: unknown };
+    assert.equal(value.languageSample, old.text); assert.equal(value.request.origin, "external"); assert.equal(value.request.message, input.text);
+    assert.equal(value.conversation, undefined);
+    return "Taylor asked to move this meeting. Can we change it?";
+  });
+  await new Inbound(f.app, async () => assert.fail("Only the actual private draft is tested here")).defer(booked, input, "Please approve the guest's move privately.");
+  assert.equal(f.ports.messages.at(-1)?.thread, "owner");
 });

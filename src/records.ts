@@ -71,7 +71,8 @@ export class Records {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS operations(key TEXT PRIMARY KEY, input TEXT NOT NULL, state TEXT NOT NULL, receipt TEXT);
       CREATE TABLE IF NOT EXISTS projections(path TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS inbox(key TEXT PRIMARY KEY, body TEXT NOT NULL, handled INTEGER NOT NULL DEFAULT 0);`);
+      CREATE TABLE IF NOT EXISTS inbox(key TEXT PRIMARY KEY, body TEXT NOT NULL, handled INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS cursors(key TEXT PRIMARY KEY, position INTEGER NOT NULL);`);
     this.recoverPages();
   }
   close(): void { this.db.close(); }
@@ -151,6 +152,21 @@ export class Records {
   ownerSource(thread: string): Source | null {
     const row = this.db.prepare("SELECT body FROM inbox WHERE json_extract(body,'$.thread')=? AND json_extract(body,'$.owner')=1 ORDER BY rowid DESC LIMIT 1").get(thread);
     return row ? source.parse(JSON.parse(z.object({ body: z.string() }).parse(row).body)) : null;
+  }
+  cursor(): number | null {
+    return z.number().int().nonnegative().nullable().parse(this.db.prepare("SELECT (SELECT position FROM cursors WHERE key='messages') AS position").get()?.position);
+  }
+  advanceCursor(position: number): void {
+    this.db.prepare("INSERT INTO cursors(key,position) VALUES ('messages',?) ON CONFLICT(key) DO UPDATE SET position=max(position,excluded.position)").run(position);
+  }
+  async capture(value: Source): Promise<void> {
+    if (value.channel !== "messages" || value.owner) throw new Error("Discovery requires an incoming Mac receipt.");
+    await this.effect(`discovery:${sourceKey(value)}`, value, source, { run: async () => value, retry: "safe" });
+    this.receive(value);
+  }
+  isDiscovered(value: Source): boolean {
+    const receipt = this.operation(`discovery:${sourceKey(value)}`);
+    return value.channel === "messages" && !value.owner && receipt?.state === "confirmed" && receipt.receipt === JSON.stringify(source.parse(value));
   }
   uncertain(): string[] { return this.unfinished().map(value => value.key); }
   operation(key: string): z.infer<typeof operationRow> | null {

@@ -22,6 +22,7 @@ export interface Ports {
   message(thread: string, messageId: string): Promise<Source>;
   replies(thread: string, since: string): Promise<Source[]>;
   research(contact: string, calendar?: Calendar): Promise<unknown>;
+  archive(after: number | null): Promise<{ rowid: number; source: Source | null }[]>;
   discover(): Promise<unknown>;
 }
 
@@ -267,6 +268,20 @@ export class Providers implements Ports {
   async replies(thread: string, since: string): Promise<Source[]> {
     const inputs = (await this.messages(thread, since)).filter(value => value.direction === "inbound" && value.sender.type === "member" && Date.parse(value.created_at) > Date.parse(since));
     return Promise.all(inputs.reverse().map(value => this.message(thread, value.uid)));
+  }
+  async archive(after: number | null): Promise<{ rowid: number; source: Source | null }[]> {
+    const rows = z.array(archiveRow).parse(lines(await this.mac(["plow-messages", "search", "--order", after === null ? "desc" : "asc", "--limit", after === null ? "1" : "50",
+      ...(after === null ? [] : ["--after-rowid", String(after)])], ["~/Library/Messages"])));
+    const identity = z.object({ line: z.object({ provider_key: handle.optional() }).optional(), chats: z.array(chat) }).parse(await this.request("/agents/me"));
+    const excluded = new Set([...(identity.line?.provider_key ? [identity.line.provider_key] : []), ...identity.chats.flatMap(value => value.participants.flatMap(person => person.type === "agent"
+      ? person.line.provider_key ? [person.line.provider_key] : [] : person.role === "owner" ? [person.provider_key] : []))]);
+    return rows.toSorted((a, b) => a.rowid - b.rowid).map(row => {
+      const sender = handle.safeParse(row.sender), peer = handle.safeParse(row.chat_guid.replace(/^iMessage;-;/, ""));
+      const eligible = !row.is_from_me && row.chat_guid.startsWith("iMessage;-;") && sender.success && peer.success
+        && sender.data === peer.data && !excluded.has(sender.data) && row.body.trim();
+      return { rowid: row.rowid, source: eligible ? source.parse({ channel: "messages", thread: row.chat_guid, messageId: String(row.rowid),
+        handle: sender.data, owner: false, at: new Date(row.at).toISOString(), text: row.body }) : null };
+    });
   }
   async discover(): Promise<unknown> {
     const identity = z.object({ chats: z.array(chat) }).parse(await this.request("/agents/me"));

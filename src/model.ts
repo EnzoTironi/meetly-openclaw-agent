@@ -51,7 +51,7 @@ export const source = z.object({
 });
 export type Source = z.infer<typeof source>;
 export type Actor = { kind: "owner"; source: Source; mainDm: boolean; hostContext: object }
-  | { kind: "guest"; source: Source } | { kind: "maintenance" };
+  | { kind: "guest"; source: Source } | { kind: "discovery"; source: Source } | { kind: "maintenance" };
 export const contact = z.object({ name: text, handle });
 export type Contact = z.infer<typeof contact>;
 

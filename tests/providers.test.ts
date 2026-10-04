@@ -29,6 +29,24 @@ test("a served group derives exactly one guest from the roster and rejects mixed
   const extra = { ...guest, uid: "other", provider_key: "other@example.test" };
   await assert.rejects(provider(async input => String(input).endsWith("/agents/me") ? api()(input) : Response.json({ ...group, participants: [...group.participants, extra] })).groupContact("group"), /single verified/);
 });
+test("Mac discovery reads a bounded ordered cursor and excludes outgoing, group, SMS, owner and agent messages", async () => {
+  const rows = [
+    { rowid: 10, sender: guest.provider_key, chat_guid: `iMessage;-;${guest.provider_key}`, is_from_me: 0, at: incoming.created_at, body: "Can we meet?" },
+    { rowid: 11, sender: null, chat_guid: `iMessage;-;${guest.provider_key}`, is_from_me: 1, at: incoming.created_at, body: "Already answered" },
+    { rowid: 12, sender: guest.provider_key, chat_guid: "iMessage;+;group", is_from_me: false, at: incoming.created_at, body: "Group conversation" },
+    { rowid: 13, sender: guest.provider_key, chat_guid: `SMS;-;${guest.provider_key}`, is_from_me: false, at: incoming.created_at, body: "SMS" },
+    ...[owner.provider_key, self.line.provider_key].map((sender, i) => ({ rowid: 14 + i, sender, chat_guid: `iMessage;-;${sender}`, is_from_me: false, at: incoming.created_at, body: "Another assistant or owner" })),
+  ];
+  const calls: string[][] = [];
+  const p = provider(api(), async argv => { calls.push(argv); return rows.map(value => JSON.stringify(value)).join("\n"); });
+  const result = await p.archive(9);
+  assert.deepEqual(result.filter(row => row.source).map(row => row.source?.handle), [guest.provider_key]);
+  assert.equal(result.at(-1)?.rowid, 15); assert.deepEqual(calls[0], ["plow-messages", "search", "--order", "asc", "--limit", "50", "--after-rowid", "9"]);
+  await p.archive(null); assert.ok(calls[1]?.includes("desc") && calls[1]?.includes("1") && !calls[1]?.includes("--after-rowid"));
+  const compact: typeof fetch = async input => String(input).endsWith("/agents/me")
+    ? Response.json({ line: self.line, chats: [home, group].map(chat => ({ ...chat, participants: chat.participants.map(person => person.type === "agent" ? { ...person, line: { uid: self.line.uid } } : person) })) }) : api()(input);
+  assert.deepEqual((await provider(compact, async () => rows.map(row => JSON.stringify(row)).join("\n")).archive(9)).filter(row => row.source).map(row => row.source?.handle), [guest.provider_key]);
+});
 
 test("lossless calendar reads preserve the native managed Zoom URL, including its password", () => {
   const zoom = "https://zoom.us/j/123456789?pwd=exact_password";

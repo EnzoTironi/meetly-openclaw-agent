@@ -29,6 +29,17 @@ export class Inbound {
   readonly app: Scheduling;
   readonly complete: Complete;
   constructor(app: Scheduling, complete: Complete) { this.app = app; this.complete = complete; }
+  async discover(): Promise<void> {
+    const { records, ports } = this.app;
+    if (!records.owner() || records.owner()?.paused) return;
+    const cursor = records.cursor(), rows = await ports.archive(cursor);
+    if (cursor === null) { records.advanceCursor(rows.at(-1)?.rowid ?? 0); return; }
+    for (const row of rows) {
+      if (row.rowid <= cursor) continue;
+      if (row.source) await records.capture(row.source);
+      records.advanceCursor(row.rowid);
+    }
+  }
   async handle(input: Source): Promise<void> {
     if (this.app.records.isHandled(input)) return;
     if (this.app.records.owner()?.paused) return;
@@ -51,8 +62,11 @@ export class Inbound {
     this.app.records.handled(input);
   }
   accepts(input: Source): boolean {
-    if (input.owner || input.channel !== "plow") return false;
-    return !this.app.records.contact(input.handle)?.meetings.some(value => value.status === "do_not_contact");
+    if (input.owner) return false;
+    const discovered = this.app.records.isDiscovered(input);
+    if (input.channel !== "plow" && !discovered) return false;
+    const states = this.app.records.contact(input.handle)?.meetings.map(value => value.status) ?? [];
+    return !states.includes("do_not_contact") && !(discovered && states.some(status => ["new", "waiting_on_us", "held", "sent", "waiting_on_them"].includes(status)));
   }
   async conversation(input: Source): Promise<{ current: Meeting | undefined; context: unknown; unavailable: boolean } | null> {
     let current = this.app.records.contact(input.handle)?.meetings.filter(value => (value.proposed?.thread ?? value.source.thread) === input.thread && ["held", "sent", "waiting_on_them", "confirmed"].includes(value.status))
@@ -64,9 +78,14 @@ export class Inbound {
     }
     if (current) return { current, context: publicContext(current), unavailable: false };
     const prefs = this.app.records.owner(), research = await this.app.ports.research(input.handle, prefs?.calendar);
+    if (input.channel === "messages") {
+      const history = z.object({ texts: z.array(z.object({ rowid: z.number(), is_from_me: z.union([z.boolean(), z.literal(0), z.literal(1)]) })).default([]) }).parse(research);
+      if (history.texts.some(row => row.is_from_me && row.rowid > Number(input.messageId))) return null;
+    }
     return { current, unavailable: false, context: { preferences: { defaultFormat: prefs?.defaultFormat, durations: prefs?.durations }, research } };
   }
   async apply(intent: z.infer<typeof interpretation>, input: Source, current: Meeting | undefined): Promise<void> {
+    if (input.channel === "messages" && intent.action !== "request") return;
     switch (intent.action) {
       case "ignore": return;
       case "reply": await this.app.reply(input, intent.text); return;
@@ -84,7 +103,7 @@ export class Inbound {
     try {
       await this.app.run(intent.details
         ? { action: "prepare", contact: { name: intent.name, handle: input.handle }, details: intent.details, range: intent.range ?? futureRange(this.app.now()) }
-        : { action: "ask", contact: { name: intent.name, handle: input.handle }, question: intent.question ?? "Please confirm the missing meeting details privately." }, { kind: "guest", source: input });
+        : { action: "ask", contact: { name: intent.name, handle: input.handle }, question: intent.question ?? "Please confirm the missing meeting details privately." }, { kind: input.channel === "messages" ? "discovery" : "guest", source: input });
     } catch (error) {
       if (!(error instanceof RejectedEffect)) throw error;
       const current = this.app.records.contact(input.handle)?.meetings.at(-1);
