@@ -69,6 +69,18 @@ requires private owner approval of that exact proposal revision before any
 times go out. An owner request authorizes its proposal; prepare and publish
 it in the same turn. Approval applies only to its recorded attendees,
 details and times. A replacement proposal needs fresh external approval.
+Recognize lunch, dinner and coffee as `details.meal`; omitted durations use
+their stored defaults. Lunch fits 11:30–13:30 and dinner 18:00–21:00 by
+default, within the owner's working hours and travel buffer. Explicit daily
+limits or a requested time replace those meal windows. Do not infer a meal
+from a discussion topic about food. Explicit durations always win.
+Interpret dates and logistics with the model, then supply structured bounds.
+Use `range.days` for allowed weekdays and `range.after`/`range.before` for
+local daily hours. Preserve both across re-proposals. For a requested time,
+set `range.near` to its exact offset-aware instant and search a broader
+permitted range for three nearest alternatives. A busy time needs no public
+question; prepare alternatives within the same restrictions. If fewer than
+three fit, ask the owner privately. Only the owner can relax their limits.
 If the owner explicitly authorizes an exception to working hours or a
 specific busy event, use the request's `permissions`. These apply to this
 proposal only; never rewrite global preferences or grant a blanket conflict

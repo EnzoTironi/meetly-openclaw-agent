@@ -9,6 +9,7 @@ import { Records, RejectedEffect } from "../src/records.ts";
 import { Scheduling, type Compose } from "../src/scheduling.ts";
 import type { Ports, WriteEvent } from "../src/providers.ts";
 import { Inbound } from "../src/inbound.ts";
+import { plan, wall, windows } from "../src/availability.ts";
 
 const now = Date.parse("2026-10-05T08:00:00Z");
 const ownerSource = source.parse({ channel: "plow", thread: "owner", messageId: "owner-request", at: new Date(now).toISOString(), handle: "+15550000001", owner: true, text: "Schedule a project review with Taylor." });
@@ -103,6 +104,124 @@ function fixture(t: TestContext) {
   const choose = async (value: Meeting, option = 1) => meeting.parse(await app.run({ action: "choose", meetingId: value.id, revision: 1, option }, guest));
   return { root, records, ports, app, held, sent, choose, advance: (ms: number) => { clock += ms; } };
 }
+
+for (const meal of ["lunch", "dinner", "coffee"] as const) test(`${meal} uses its remembered duration and sensible local times with verified holds`, async t => {
+  const f = fixture(t);
+  f.records.remember(preferences.parse({ ...prefs, hours: { ...prefs.hours, to: "22:00" }, travelMin: 30 }), ownerSource);
+  const held = meeting.parse(await f.app.run({ ...prepare, details: { ...prepare.details, kind: "in_person", location: "Guest's office", meal } }, owner));
+  assert.equal(held.status, "held"); if (held.status !== "held") return;
+  const start = meal === "lunch" ? "11:30" : meal === "dinner" ? "18:00" : "09:30";
+  assert.deepEqual(held.proposal.slots.map(value => value.start), [5, 6, 7].map(date => `2026-10-0${date}T${start}:00.000Z`));
+  assert.equal(held.details.durationMin, meal === "coffee" ? 30 : 60);
+  assert.equal(f.ports.events.size, 9);
+  const sent = meeting.parse(await f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner));
+  const booked = await f.choose(sent); assert.equal(booked.status, "confirmed");
+  assert.equal(f.ports.events.size, 3); assert.equal(booked.cleanup.length, 0);
+});
+test("explicit meal duration and daily hours win over defaults, while saved meal duration is reused", async t => {
+  const f = fixture(t);
+  f.records.remember(preferences.parse({ ...prefs, durations: { ...prefs.durations, lunch: 45 } }), ownerSource);
+  const details = { ...prepare.details, meal: "lunch" };
+  const first = meeting.parse(await f.app.run({ ...prepare, details }, owner));
+  assert.equal(first.status, "held"); if (first.status !== "held") return;
+  assert.equal(first.details.durationMin, 45);
+  await f.app.run({ action: "cancel", meetingId: first.id }, owner);
+  const actor: Actor = { ...owner, source: source.parse({ ...ownerSource, messageId: "late-lunch", text: "A 20-minute lunch, after 2." }) };
+  const second = meeting.parse(await f.app.run({ ...prepare, details: { ...details, durationMin: 20 }, range: { ...range, after: "14:00" } }, actor));
+  assert.equal(second.status, "held"); if (second.status !== "held") return;
+  assert.equal(second.details.durationMin, 20);
+  assert.deepEqual(second.proposal.slots.map(value => value.start), [5, 6, 7].map(date => `2026-10-0${date}T14:00:00.000Z`));
+});
+test("dinner outside the owner's hours asks privately and creates no orphan reservations or pending writes", async t => {
+  const f = fixture(t), details = { ...prepare.details, kind: "in_person", location: "Guest's office", meal: "dinner" };
+  const blocked = meeting.parse(await f.app.run({ ...prepare, details }, owner));
+  assert.equal(blocked.status, "waiting_on_us"); assert.equal(f.ports.events.size, 0);
+  assert.ok(f.ports.messages.length > 0 && f.ports.messages.every(value => value.thread === "owner"));
+  assert.deepEqual(f.records.uncertain(), []);
+  const actor: Actor = { ...owner, source: source.parse({ ...ownerSource, messageId: "allow-dinner", text: "You may schedule this dinner outside working hours." }) };
+  const held = meeting.parse(await f.app.run({ ...prepare, details, permissions: { outsideHours: true } }, actor));
+  assert.equal(held.status, "held"); assert.equal(f.ports.events.size, 9);
+  assert.deepEqual(f.records.owner()?.hours, prefs.hours);
+});
+test("weekday and daily limits apply in the owner's timezone and survive a restart and guest re-proposal", async t => {
+  const f = fixture(t);
+  f.records.remember(preferences.parse({ ...prefs, timezone: "America/Sao_Paulo" }), ownerSource);
+  const limited = { ...range, days: ["mon", "wed"], after: "14:00", before: "17:00" };
+  const held = meeting.parse(await f.app.run({ ...prepare, range: limited }, owner));
+  const sent = meeting.parse(await f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner));
+  assert.deepEqual(sent.proposed?.slots.map(value => value.start), ["2026-10-05T17:00:00.000Z", "2026-10-07T17:00:00.000Z", "2026-10-12T17:00:00.000Z"]);
+  const old = liveHolds(sent);
+  f.records.close(); const reopened = new Records(f.root); t.after(() => reopened.close());
+  const restarted = new Scheduling(reopened, f.ports, compose, () => now);
+  const next = meeting.parse(await restarted.run({ action: "repropose", meetingId: sent.id, revision: 1, range }, guest));
+  assert.equal(next.status, "held"); if (next.status !== "held") return;
+  assert.deepEqual(next.range, limited); assert.deepEqual(next.ownerRange, limited);
+  assert.deepEqual(next.proposal.slots.map(value => value.start), ["2026-10-05T17:15:00.000Z", "2026-10-07T17:15:00.000Z", "2026-10-12T17:15:00.000Z"]);
+  assert.ok(old.every(ref => !f.ports.events.has(refKey(ref)))); assert.equal(f.ports.events.size, 3);
+});
+test("a guest cannot widen owner bounds; the owner can change them without a journal collision", async t => {
+  const f = fixture(t), limited = { ...range, days: ["mon", "wed"], after: "14:00", before: "17:00" };
+  const held = meeting.parse(await f.app.run({ ...prepare, range: limited }, owner));
+  const sent = meeting.parse(await f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner));
+  const refs = liveHolds(sent), previous = f.ports.messages.length;
+  const blocked = meeting.parse(await f.app.run({ action: "repropose", meetingId: sent.id, revision: 1, range: { ...range, days: ["tue"] } }, guest));
+  assert.equal(blocked.status, "sent"); assert.deepEqual(liveHolds(blocked), refs);
+  assert.ok(f.ports.messages.slice(previous).length > 0 && f.ports.messages.slice(previous).every(value => value.thread === "owner"));
+  assert.deepEqual(f.records.uncertain(), []);
+  const actor: Actor = { ...owner, source: source.parse({ ...ownerSource, messageId: "allow-tuesday", text: "Tuesday after 3 is fine instead." }) };
+  const permitted = { ...range, days: ["tue"], after: "15:00", before: "17:00" };
+  const next = meeting.parse(await f.app.run({ action: "repropose", meetingId: sent.id, revision: 1, range: permitted }, actor));
+  assert.equal(next.status, "sent"); if (next.status !== "sent") return;
+  assert.deepEqual(next.ownerRange, permitted);
+  assert.ok(next.proposal.slots.every(value => wall(Date.parse(value.start), "UTC").weekday === "tue"));
+  assert.ok(refs.every(ref => !f.ports.events.has(refKey(ref)))); assert.deepEqual(f.records.uncertain(), []);
+});
+test("fewer than three replacement times retain the current sent proposal and every live hold", async t => {
+  const f = fixture(t), sent = await f.sent(), refs = liveHolds(sent), previous = f.ports.messages.length;
+  const next = meeting.parse(await f.app.run({ action: "repropose", meetingId: sent.id, revision: 1,
+    range: { from: "2026-10-05T15:00:00Z", to: "2026-10-05T15:30:00Z" } }, guest));
+  assert.equal(next.status, "sent"); assert.deepEqual(next.proposed, sent.proposed); assert.deepEqual(liveHolds(next), refs);
+  assert.equal(f.ports.events.size, 3); assert.deepEqual(f.records.uncertain(), []);
+  assert.ok(f.ports.messages.slice(previous).length > 0 && f.ports.messages.slice(previous).every(value => value.thread === "owner"));
+});
+test("a busy preferred time produces the nearest three permitted non-overlapping alternatives", async t => {
+  const f = fixture(t), busy = event.parse({ ref: { calendar: prefs.calendar, id: "busy" }, status: "confirmed", start: "2026-10-05T13:30:00Z", end: "2026-10-05T14:30:00Z",
+    title: "Private medical appointment", location: "", attendees: [], conference: "", transparent: false, declined: false, marker: "" });
+  f.ports.events.set(refKey(busy.ref), busy);
+  const held = meeting.parse(await f.app.run({ ...prepare, range: { ...range, days: ["mon"], after: "12:00", before: "16:00", near: "2026-10-05T14:00:00Z" } }, owner));
+  assert.equal(held.status, "held"); if (held.status !== "held") return;
+  assert.deepEqual(held.proposal.slots.map(value => value.start), ["2026-10-05T13:00:00.000Z", "2026-10-05T14:30:00.000Z", "2026-10-05T15:00:00.000Z"]);
+  assert.deepEqual(f.ports.events.get(refKey(busy.ref)), busy);
+  const sent = meeting.parse(await f.app.run({ action: "publish", meetingId: held.id, revision: 1 }, owner));
+  assert.doesNotMatch(sent.proposed?.text ?? "", /medical|appointment/);
+});
+test("nearest in-person options remain disjoint including both travel buffers", async t => {
+  const f = fixture(t), held = meeting.parse(await f.app.run({ ...prepare, details: { ...prepare.details, kind: "in_person", location: "Guest's office", durationMin: 30 },
+    range: { ...range, days: ["mon"], after: "11:00", before: "17:00", near: "2026-10-05T14:00:00Z" } }, owner));
+  assert.equal(held.status, "held"); if (held.status !== "held") return;
+  assert.deepEqual(held.proposal.slots.map(value => value.start), ["2026-10-05T12:30:00.000Z", "2026-10-05T14:00:00.000Z", "2026-10-05T15:30:00.000Z"]);
+  const spans = held.proposal.slots.map(value => windows(value, held.details));
+  for (let index = 1; index < spans.length; index++) assert.ok(spans[index - 1]!.every(a => spans[index]!.every(b => Date.parse(a.end) <= Date.parse(b.start))));
+  assert.equal(f.ports.events.size, 9);
+});
+test("a displaced priority block uses free working time rather than inheriting lunch restrictions", async t => {
+  const f = fixture(t);
+  f.records.remember(preferences.parse({ ...prefs, hours: { days: ["mon"], from: "09:00", to: "14:00" }, travelMin: 0, movableTitles: ["Prayer time"] }), ownerSource);
+  const block = event.parse({ ref: { calendar: prefs.calendar, id: "prayer" }, status: "confirmed", start: "2026-10-05T11:30:00Z", end: "2026-10-05T12:30:00Z",
+    title: "Prayer time", location: "", attendees: [], conference: "", transparent: false, declined: false, marker: "", createdByOwner: true });
+  f.ports.events.set(refKey(block.ref), block);
+  const held = meeting.parse(await f.app.run({ ...prepare, details: { ...prepare.details, kind: "in_person", location: "Guest's office", meal: "lunch", durationMin: 30 },
+    range: { from: "2026-10-05T08:00:00Z", to: "2026-10-05T14:00:00Z" } }, owner));
+  assert.equal(held.status, "held"); if (held.status !== "held") return;
+  assert.deepEqual(held.proposal.slots.map(value => value.start), ["2026-10-05T11:30:00.000Z", "2026-10-05T12:00:00.000Z", "2026-10-05T12:30:00.000Z"]);
+  assert.equal(f.ports.events.get(refKey(block.ref))?.start, "2026-10-05T09:00:00.000Z");
+});
+test("daily limits still constrain elapsed meeting time across the spring DST jump", () => {
+  const search = { prefs: preferences.parse({ ...prefs, timezone: "America/New_York", noticeMin: 0 }), details: { kind: "phone" as const, durationMin: 60 },
+    range: { from: "2027-03-14T00:00:00-05:00", to: "2027-03-15T00:00:00-04:00", days: ["sun" as const], after: "01:00", before: "03:00" },
+    events: [], now: Date.parse("2027-03-13T00:00:00Z"), outsideHours: true };
+  assert.throws(() => plan(search), /fewer than three/);
+});
 
 test("owner request holds three options, persists actual sent prose, verifies the invite and removes every sibling", async t => {
   const f = fixture(t), held = await f.held();

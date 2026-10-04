@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { conflicts, insideHours, label, movableBlock, plan, windows } from "./availability.ts";
-import { advice, assertInvitation, assertOwner, assertParticipant, command, delivery, details, endOf, event, eventRef, invitation, liveHolds, meeting, permissions, proposal, publicContext, refKey, source,
+import { conflicts, insideHours, label, movableBlock, plan, restrictRange, windows } from "./availability.ts";
+import { advice, assertInvitation, assertOwner, assertParticipant, command, DecisionRequired, delivery, details, endOf, event, eventRef, invitation, liveHolds, meeting, permissions, proposal, publicContext, refKey, source,
   type Actor, type Calendar, type Command, type Confirmed, type Details, type Event, type EventRef, type Held, type Meeting, type Offered, type Permissions, type Preferences, type Range, type Slot, type Source } from "./model.ts";
 import { invitationWrite, verifyBooked } from "./invitation.ts";
 import { Records, RejectedEffect } from "./records.ts";
@@ -10,11 +10,11 @@ import { writeEvent, type Ports, type WriteEvent } from "./providers.ts";
 const task = z.object({ command, authority: z.object({ kind: z.enum(["owner", "guest", "discovery"]), source, mainDm: z.boolean() }) });
 const threeCandidates = z.tuple([z.object({ start: z.string(), durationMin: z.number() }), z.object({ start: z.string(), durationMin: z.number() }), z.object({ start: z.string(), durationMin: z.number() })]);
 const availabilityPlan = z.object({ slots: threeCandidates, moves: z.array(z.object({ event, start: z.string(), end: z.string() })) });
-class DecisionRequired extends Error {}
 const hash = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 24);
 const identity = (value: Source, contact: string): string => hash([value.channel, value.thread, value.messageId, contact]);
 const iso = (now: number): string => new Date(now).toISOString();
 export type Compose = (context: unknown) => Promise<string>;
+type HoldRequest = { range: Range; revision: number; excluded: string[]; permissions?: Permissions; ownerRange?: Range };
 const closedStatuses = new Set(["passed", "do_not_contact"]);
 function isOffered(value: Meeting): value is Offered { return value.status === "sent" || value.status === "waiting_on_them"; }
 function assertChoice(value: Meeting, option: number): void {
@@ -206,7 +206,7 @@ export class Scheduling {
     return value;
   }
   materialize(input: Extract<Command, { action: "prepare" }>["details"], prefs: Preferences): Details {
-    const common = { ...input, durationMin: input.durationMin ?? prefs.durations[input.kind], timezone: prefs.timezone };
+    const common = { ...input, durationMin: input.durationMin ?? prefs.durations[input.meal ?? input.kind], timezone: prefs.timezone };
     if (input.kind === "video") {
       if (!prefs.video) throw new DecisionRequired("Which video provider should Meetly use, and should Zoom use a personal room or a new link per meeting?");
       return details.parse({ ...common, video: prefs.video });
@@ -222,14 +222,14 @@ export class Scheduling {
     let info: Details;
     try { info = this.materialize(input.details, prefs); }
     catch (error) { if (error instanceof DecisionRequired) return this.question(value, error.message); throw error; }
-    try { return await this.hold(value, info, { range: input.range, revision: 1, excluded: [], permissions: input.permissions }); }
+    try { return await this.hold(value, info, { range: input.range, revision: 1, excluded: [], permissions: input.permissions, ownerRange: actor.kind === "owner" ? input.range : undefined }); }
     catch (error) {
       if (error instanceof RejectedEffect) {
         const current = this.records.find(value.id);
         this.records.save(meeting.parse({ ...current, status: "passed", reserved: [], cleanup: liveHolds(current), updatedAt: iso(this.now()) }), "The provider rejected further holds. Release the verified partial holds.");
         await this.cleanup(value.id); throw error;
       }
-      if (error instanceof Error && error.message.startsWith("There are fewer")) return this.question(value, error.message);
+      if (error instanceof DecisionRequired) return this.question(value, error.message);
       throw error;
     }
   }
@@ -242,13 +242,21 @@ export class Scheduling {
     this.records.save(next, `The private owner question was confirmed in inbox message ${receipt.messageId}.`);
     return next;
   }
-  async hold(value: Meeting, info: Details, request: { range: Range; revision: number; excluded: string[]; permissions?: Permissions }): Promise<Held> {
+  async availability(value: Meeting, info: Details, request: HoldRequest): Promise<z.infer<typeof availabilityPlan>> {
     const { range, revision, excluded, permissions: allowed = permissions.parse({}) } = request;
-    const prefix = `${value.id}/r${revision}`;
     const prefs = this.preferences();
-    const planned = await this.records.effect(`${prefix}/availability`, { info, range, excluded, allowed }, availabilityPlan, {
-      run: async () => plan({ prefs, details: info, range, events: await this.ports.list(prefs.busyCalendars, range), now: this.now(), ignored: [...liveHolds(value), ...allowed.conflicts], excluded, outsideHours: allowed.outsideHours }), retry: "safe",
-    });
+    const input = { info, range, excluded, allowed }, legacy = `${value.id}/r${revision}/availability`;
+    const key = this.records.operation(legacy) ? legacy : `${legacy}/${hash(input)}`;
+    const calculate = async () => plan({ prefs, details: info, range, events: await this.ports.list(prefs.busyCalendars, range), now: this.now(), ignored: [...liveHolds(value), ...allowed.conflicts], excluded, outsideHours: allowed.outsideHours });
+    // Calendar reads have no side effects. Admit only a feasible plan, so a
+    // private request to widen constraints cannot strand a pending write.
+    const calculated = this.records.operation(key) ? null : await calculate();
+    return this.records.effect(key, input, availabilityPlan, { run: async () => calculated ?? calculate(), retry: "safe" });
+  }
+  async hold(value: Meeting, info: Details, request: HoldRequest): Promise<Held> {
+    const { range, revision, permissions: allowed = permissions.parse({}) } = request;
+    const prefix = `${value.id}/r${revision}`, prefs = this.preferences();
+    const planned = await this.availability(value, info, request);
     for (const move of planned.moves) await this.movePriority(value, move, prefix);
     const options = planned.slots;
     const markers = new Set(options.flatMap((option, index) => windows(option, info).map(span => `${prefix}/s${index + 1}/${span.role}`)));
@@ -266,7 +274,7 @@ export class Scheduling {
     const nextProposal = proposal.parse({ revision, slots: held, expiresAt: iso(this.now() + 48 * 3_600_000) });
     const createdKeys = new Set(held.flatMap(value => [value.meeting, ...value.travel]).map(refKey));
     const current = this.records.find(value.id);
-    const next = meeting.parse({ ...current, status: "held", details: info, range, permissions: allowed, nextRevision: revision + 1, proposal: nextProposal,
+    const next = meeting.parse({ ...current, status: "held", details: info, range, ownerRange: request.ownerRange, permissions: allowed, nextRevision: revision + 1, proposal: nextProposal,
       approval: current.origin === "external" ? "required" : "authorized", reserved: current.reserved.filter(ref => !createdKeys.has(refKey(ref))), updatedAt: iso(this.now()) });
     if (next.status !== "held") throw new Error("The verified proposal did not produce a held meeting.");
     this.records.save(next, `The calendar verified all three options for proposal ${revision}.`);
@@ -481,19 +489,33 @@ export class Scheduling {
     }
     return value;
   }
+  private replacementRequest(value: Offered, range: Range, actor: Actor, allowed?: Permissions): HoldRequest {
+    const ownerRange = actor.kind === "owner" ? range : value.ownerRange ?? (value.origin === "owner" ? value.range : undefined);
+    const narrowed = restrictRange(range, ownerRange);
+    if (!narrowed) throw new DecisionRequired("The guest's requested dates or daily limits do not fit your scheduling constraints. Please decide privately whether to change those constraints.");
+    return { range: narrowed, ownerRange, revision: value.nextRevision, excluded: value.proposal.slots.map(slot => slot.start), permissions: allowed };
+  }
   async repropose(id: string, revision: number, range: Range, actor: Actor, allowed?: Permissions): Promise<Meeting> {
     const current = this.records.find(id);
     if (current.status === "held" && current.proposal.revision === revision + 1) { assertParticipant(actor, current); return current; }
-    const snapshot = await this.records.effect(`${id}/r${revision}/replacement-plan`, { range, allowed }, meeting, { run: async () => this.offered(id, revision, actor), retry: "safe" });
+    const legacy = `${id}/r${revision}/replacement-plan`, input = { range, allowed };
+    const key = this.records.operation(legacy) ? legacy : `${legacy}/${hash(input)}`;
+    const snapshot = await this.records.effect(key, input, meeting, { run: async () => this.offered(id, revision, actor), retry: "safe" });
     if (snapshot.status !== "sent" && snapshot.status !== "waiting_on_them") throw new Error("The replacement plan has no verified sent proposal.");
     assertParticipant(actor, snapshot);
     const value = snapshot;
+    let request: HoldRequest;
+    try { request = this.replacementRequest(value, range, actor, allowed); await this.availability(value, value.details, request); }
+    catch (error) {
+      if (error instanceof DecisionRequired) return this.question(current, error.message);
+      throw error;
+    }
     if (current.status === "sent" || current.status === "waiting_on_them") {
       const retired = meeting.parse({ ...value, status: "new", reserved: [], cleanup: liveHolds(value), updatedAt: iso(this.now()) });
       this.records.save(retired, `Inbox message ${actor.kind === "maintenance" ? "" : actor.source.messageId} requested new options for proposal ${revision}.`);
     }
     await this.cleanup(id);
-    const next = await this.hold(this.records.find(id), value.details, { range, revision: value.nextRevision, excluded: value.proposal.slots.map(slot => slot.start), permissions: allowed });
+    const next = await this.hold(this.records.find(id), value.details, request);
     return next.approval === "authorized" && actor.kind === "owner" ? this.publish(id, next.proposal.revision, actor) : next;
   }
   async move(id: string, start: string, actor: Actor, allowed: Permissions = permissions.parse({})): Promise<Meeting> {
