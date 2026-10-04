@@ -42,11 +42,12 @@ export function conflicts(value: Candidate, details: Timing, events: Event[], ig
     && spans.some(span => Date.parse(event.start) < Date.parse(span.end) && Date.parse(event.end) > Date.parse(span.start)));
 }
 
-export function insideHours(value: Candidate, details: Timing, prefs: Preferences, now: number): boolean {
+export function insideHours(value: Candidate, details: Timing, prefs: Preferences, now: number, outsideHours = false): boolean {
   const spans = windows(value, details);
   const beginning = Math.min(...spans.map(span => Date.parse(span.start)));
   const end = Math.max(...spans.map(span => Date.parse(span.end)));
   if (beginning < now + prefs.noticeMin * 60_000) return false;
+  if (outsideHours) return true;
   const a = wall(beginning, prefs.timezone), b = wall(end, prefs.timezone);
   return prefs.hours.days.includes(a.weekday) && a.year === b.year && a.month === b.month && a.date === b.date
     && a.hour * 60 + a.minute >= minutes(prefs.hours.from) && b.hour * 60 + b.minute <= minutes(prefs.hours.to);
@@ -54,7 +55,7 @@ export function insideHours(value: Candidate, details: Timing, prefs: Preference
 
 type Search = {
   prefs: Preferences; details: Timing; range: Range; events: Event[]; now: number;
-  ignored?: EventRef[]; excluded?: string[];
+  ignored?: EventRef[]; excluded?: string[]; outsideHours?: boolean;
 };
 type Move = { event: Event; start: string; end: string };
 const insufficient = "There are fewer than three verified free options. Ask the owner privately to widen the range or move a block.";
@@ -63,13 +64,13 @@ function dayCandidates(date: Date, search: Search): Candidate[] {
   const { prefs, details, range, now, events } = search;
   const excluded = new Set(search.excluded?.map(Date.parse));
   const result: Candidate[] = [];
-  for (let minute = minutes(prefs.hours.from); minute < minutes(prefs.hours.to); minute += 15) {
+  for (let minute = search.outsideHours ? 0 : minutes(prefs.hours.from); minute < (search.outsideHours ? 1440 : minutes(prefs.hours.to)); minute += 15) {
     const at = wallTime(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(), minute, prefs.timezone);
     if (at === null || excluded.has(at)) continue;
     const value = { start: new Date(at).toISOString(), durationMin: details.durationMin };
     const spans = windows(value, details);
     if (spans.some(span => Date.parse(span.start) < Date.parse(range.from) || Date.parse(span.end) > Date.parse(range.to))) continue;
-    if (insideHours(value, details, prefs, now) && !conflicts(value, details, events, search.ignored).length) result.push(value);
+    if (insideHours(value, details, prefs, now, search.outsideHours) && !conflicts(value, details, events, search.ignored).length) result.push(value);
   }
   return result;
 }

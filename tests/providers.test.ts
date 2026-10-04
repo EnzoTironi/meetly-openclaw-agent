@@ -23,6 +23,13 @@ const api = (messages = [incoming, outgoing]): typeof fetch => async input => {
   return Response.json(url.endsWith("/owner") ? home : group);
 };
 
+test("a served group derives exactly one guest from the roster and rejects mixed-contact groups", async () => {
+  assert.equal((await provider(api()).groupContact("group")).handle, guest.provider_key);
+  await assert.rejects(provider(api()).groupContact("owner"), /single verified/);
+  const extra = { ...guest, uid: "other", provider_key: "other@example.test" };
+  await assert.rejects(provider(async input => String(input).endsWith("/agents/me") ? api()(input) : Response.json({ ...group, participants: [...group.participants, extra] })).groupContact("group"), /single verified/);
+});
+
 test("lossless calendar reads preserve the native managed Zoom URL, including its password", () => {
   const zoom = "https://zoom.us/j/123456789?pwd=exact_password";
   const value = parseEvent({ event: { ...raw, description: `<!-- gog-zoom-meeting:123456789 -->\nJoin Zoom Meeting: ${zoom}\n<!-- /gog-zoom-meeting -->` } }, cal, "UTC");
@@ -112,7 +119,7 @@ test("a supplied iMessage email is researched directly without requiring a Conta
   const calls: string[][] = [];
   const p = provider(api(), async argv => { calls.push(argv); return argv[0] === "plow-messages" ? "" : JSON.stringify({ messages: [] }); });
   await p.research("new@example.test");
-  assert.deepEqual(calls[0]?.slice(0, 4), ["plow-messages", "thread", "--handle", "new@example.test"]);
+  assert.deepEqual(calls[0], ["plow-messages", "search", "--handle", "new@example.test", "--order", "desc", "--limit", "30"]);
   assert.ok(calls.every(argv => !argv.includes("contacts")));
 });
 test("contact research ignores other phone lines and inactive chats instead of rejecting its own served group", async () => {

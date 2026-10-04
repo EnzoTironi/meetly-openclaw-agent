@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSy
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { advice, liveHolds, page, preferences, source, type Contact, type Meeting, type Page, type Preferences, type Source } from "./model.ts";
+import { advice, liveHolds, page, preferences, source, sourceKey, type Contact, type Meeting, type Page, type Preferences, type Source } from "./model.ts";
 
 function missing(error: unknown): boolean { return error instanceof Error && "code" in error && error.code === "ENOENT"; }
 // OpenClaw may register separate plugin instances for hooks and tool discovery.
@@ -135,17 +135,17 @@ export class Records {
   receive(value: Source): boolean {
     const parsed = source.parse(value);
     return this.db.prepare("INSERT OR IGNORE INTO inbox(key,body) VALUES (?,?)")
-      .run(JSON.stringify([parsed.channel, parsed.thread, parsed.messageId]), JSON.stringify(parsed)).changes > 0;
+      .run(sourceKey(parsed), JSON.stringify(parsed)).changes > 0;
   }
   pendingSources(): Source[] {
     return z.array(z.object({ body: z.string() })).parse(this.db.prepare("SELECT body FROM inbox WHERE handled=0 ORDER BY rowid").all())
       .map(value => source.parse(JSON.parse(value.body)));
   }
   handled(value: Source): void {
-    this.db.prepare("UPDATE inbox SET handled=1 WHERE key=?").run(JSON.stringify([value.channel, value.thread, value.messageId]));
+    this.db.prepare("UPDATE inbox SET handled=1 WHERE key=?").run(sourceKey(value));
   }
   isHandled(value: Source): boolean {
-    const row = this.db.prepare("SELECT handled FROM inbox WHERE key=?").get(JSON.stringify([value.channel, value.thread, value.messageId]));
+    const row = this.db.prepare("SELECT handled FROM inbox WHERE key=?").get(sourceKey(value));
     return row !== undefined && z.object({ handled: z.number() }).parse(row).handled === 1;
   }
   ownerSource(thread: string): Source | null {

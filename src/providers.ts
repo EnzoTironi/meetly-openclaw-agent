@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { calendar, delivery, email, event, eventRef, handle, id, source, type Actor, type Calendar, type Delivery, type Event, type EventRef, type Range, type Source } from "./model.ts";
+import { calendar, delivery, email, event, eventRef, handle, id, source, type Actor, type Calendar, type Contact, type Delivery, type Event, type EventRef, type Range, type Source } from "./model.ts";
 import { wallTime } from "./availability.ts";
 import { RejectedEffect } from "./records.ts";
 
@@ -18,6 +18,7 @@ export interface Ports {
   recoverThread(member: string, text: string, since: string): Promise<Delivery | null>;
   recoverSend(thread: string, text: string, since: string): Promise<Delivery | null>;
   ownerThread(): Promise<string>;
+  groupContact(thread: string): Promise<Contact>;
   message(thread: string, messageId: string): Promise<Source>;
   replies(thread: string, since: string): Promise<Source[]>;
   research(contact: string, calendar?: Calendar): Promise<unknown>;
@@ -84,7 +85,7 @@ export function parseEvent(value: unknown, cal: Calendar, timezone: string): Eve
 }
 
 const member = z.object({ type: z.literal("member"), uid: id, role: z.string(), provider_key: handle, display_name: z.string().nullable().optional() });
-const agent = z.object({ type: z.literal("agent"), relationship: z.string(), line: z.object({ uid: id }) });
+const agent = z.object({ type: z.literal("agent"), relationship: z.string(), line: z.object({ uid: id, provider_key: handle.optional() }) });
 const chat = z.object({ uid: id, status: z.string(), trusted: z.boolean().optional(), participants: z.array(z.discriminatedUnion("type", [member, agent])) });
 function serves(value: z.infer<typeof chat>, line: string): boolean {
   return value.status === "active" && value.participants.some(item => item.type === "agent" && item.relationship === "self" && item.line.uid === line);
@@ -131,6 +132,15 @@ export class Providers implements Ports {
       && value.participants.some(item => item.type === "member" && item.role === "owner"));
     if (matches.length !== 1 || !matches[0]) throw new Error("Plow did not verify one private owner conversation.");
     return matches[0].uid;
+  }
+  async groupContact(thread: string): Promise<Contact> {
+    const roster = await this.served(thread);
+    const members = roster.participants.filter(person => person.type === "member");
+    const guests = members.filter(person => person.role !== "owner");
+    if (roster.participants.length !== 3 || members.filter(person => person.role === "owner").length !== 1 || guests.length !== 1 || !guests[0]) {
+      throw new Error("This group has no single verified meeting contact. Continue privately with the owner.");
+    }
+    return { name: guests[0].display_name ?? guests[0].provider_key, handle: guests[0].provider_key };
   }
   async messages(thread: string, since?: string): Promise<z.infer<typeof message>[]> {
     await this.served(thread);
@@ -240,7 +250,7 @@ export class Providers implements Ports {
   }
   async research(contact: string, calendar?: Calendar): Promise<unknown> {
     const exact = handle.safeParse(contact.trim()), address = exact.success ? exact.data : contact.trim();
-    const texts = exact.success ? z.array(archiveRow).parse(lines(await this.mac(["plow-messages", "thread", "--handle", exact.data, "--limit", "30"], ["~/Library/Messages"]))) : [];
+    const texts = exact.success ? z.array(archiveRow).parse(lines(await this.mac(["plow-messages", "search", "--handle", exact.data, "--order", "desc", "--limit", "30"], ["~/Library/Messages"]))) : [];
     const query = email.safeParse(address).success ? `{from:${address} to:${address}}` : address;
     const account = calendar ? ["--account", calendar.account] : [];
     const mail = await this.mac(["plow-gog", "gmail", "messages", "search", query, "--include-body", "--max", "20", ...account, "--json"]).then(jsonOutput).catch(() => "unavailable");

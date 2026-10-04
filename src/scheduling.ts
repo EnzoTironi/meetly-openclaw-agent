@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { conflicts, insideHours, label, movableBlock, plan, windows } from "./availability.ts";
-import { advice, assertInvitation, assertOwner, assertParticipant, command, delivery, details, endOf, event, eventRef, invitation, liveHolds, meeting, proposal, refKey, source,
-  type Actor, type Calendar, type Command, type Confirmed, type Details, type Event, type EventRef, type Held, type Meeting, type Offered, type Preferences, type Range, type Slot, type Source } from "./model.ts";
+import { advice, assertInvitation, assertOwner, assertParticipant, command, delivery, details, endOf, event, eventRef, invitation, liveHolds, meeting, permissions, proposal, publicContext, refKey, source,
+  type Actor, type Calendar, type Command, type Confirmed, type Details, type Event, type EventRef, type Held, type Meeting, type Offered, type Permissions, type Preferences, type Range, type Slot, type Source } from "./model.ts";
 import { invitationWrite, verifyBooked } from "./invitation.ts";
 import { Records, RejectedEffect } from "./records.ts";
 import { writeEvent, type Ports, type WriteEvent } from "./providers.ts";
@@ -43,16 +43,12 @@ export class Scheduling {
     return value;
   }
   async execute(input: Command, actor: Actor): Promise<unknown> {
-    if (input.action === "status") {
-      assertOwner(actor, true);
-      return { preferences: this.records.owner(), pipeline: this.records.pages(), unfinished: this.records.uncertain(),
-        discovery: this.records.owner() ? null : await this.ports.discover() };
-    }
-    if (input.action === "research") { assertOwner(actor, true); return { wiki: this.records.pages().filter(value => value.contact.handle === input.query || value.contact.name.toLowerCase().includes(input.query.toLowerCase())), context: await this.ports.research(input.query, this.records.owner()?.calendar) }; }
+    if (input.action === "status") return this.status(actor);
+    if (input.action === "research") return this.research(input.query, actor);
     if (input.action === "remember") { assertOwner(actor, true); this.records.remember(input.preferences, actor.source); return { remembered: true, preferences: input.preferences }; }
     if (input.action === "reconcile") { assertOwner(actor, true); return this.reconcile(); }
     if (actor.kind === "maintenance") throw new Error("Maintenance cannot initiate a new scheduling command.");
-    this.authorize(input, actor);
+    await this.authorize(input, actor);
     if (input.action === "prepare" || input.action === "ask") await this.evidence(input, actor);
     const admission = task.parse({ command: input, authority: { kind: actor.kind, source: actor.source, mainDm: actor.kind === "owner" && actor.mainDm } });
     const key = `task:${hash(admission)}`;
@@ -60,23 +56,61 @@ export class Scheduling {
       const result = await this.records.effect(key, admission, meeting.nullable(), { run: () => this.change(input, actor), retry: "safe" });
       if (!result) return null;
       const current = this.records.find(result.id);
-      return { ...current, next_step: advice(current) };
+      return this.view(current, actor);
     } catch (error) {
       if (error instanceof DecisionRequired) return { needsOwner: error.message };
       throw error;
     }
   }
-  authorize(input: Command, actor: Actor): void {
+  view(value: Meeting, actor: Actor): Record<string, unknown> {
+    if (actor.kind === "owner" && !actor.mainDm) return { ...publicContext(value), approval: "approval" in value ? value.approval : undefined,
+      cleanupPending: value.cleanup.length, next_step: advice(value) };
+    return { ...value, next_step: advice(value) };
+  }
+  async status(actor: Actor): Promise<unknown> {
+    assertOwner(actor);
+    if (!actor.mainDm) {
+      const contact = await this.ports.groupContact(actor.source.thread);
+      return { contact, timezone: this.records.owner()?.timezone, videoProvider: this.records.owner()?.video?.kind ?? null,
+        pipeline: this.records.contact(contact.handle)?.meetings.filter(value =>
+        (value.proposed?.thread ?? value.source.thread) === actor.source.thread).map(publicContext) ?? [] };
+    }
+    const pipeline = this.records.pages().map(page => ({ contact: page.contact,
+      meetings: page.meetings.filter(value => value.status !== "passed" || liveHolds(value).length).map(value => this.view(value, actor)) }))
+      .filter(page => page.meetings.length);
+    return { preferences: this.records.owner(), pipeline, unfinished: this.records.uncertain(),
+      discovery: this.records.owner() ? null : await this.ports.discover() };
+  }
+  async research(query: string, actor: Actor): Promise<unknown> {
+    assertOwner(actor);
+    const contact = actor.mainDm ? null : await this.ports.groupContact(actor.source.thread);
+    const address = contact?.handle ?? query, prefs = this.records.owner();
+    const wiki = this.records.pages().filter(value => value.contact.handle === address || value.contact.name.toLowerCase().includes(address.toLowerCase()));
+    return { contact, preferences: { timezone: prefs?.timezone, videoProvider: prefs?.video?.kind ?? null, defaultFormat: prefs?.defaultFormat, durations: prefs?.durations },
+      wiki: contact ? wiki.flatMap(page => page.meetings.map(publicContext)) : wiki, context: await this.ports.research(address, prefs?.calendar) };
+  }
+  async authorize(input: Command, actor: Actor): Promise<void> {
+    if ("permissions" in input && input.permissions) assertOwner(actor);
+    if (actor.kind === "owner" && !actor.mainDm) await this.authorizeGroup(input, actor);
     if (actor.kind === "guest" && actor.source.channel !== "plow") throw new RejectedEffect("Mac messages are research context, not authenticated Meetly requests.");
-    if (input.action === "prepare" || input.action === "ask") {
-      if (actor.kind === "guest" && (input.source || input.contact.handle !== actor.source.handle)) throw new Error("A guest can only initiate their own authenticated request.");
-      if (actor.kind !== "guest") assertOwner(actor, true);
-      if (this.records.contact(input.contact.handle)?.meetings.some(value => value.status === "do_not_contact")) throw new Error("Do not contact: the owner blocked this contact.");
-    } else if ("revision" in input) this.authorizeRevision(input, actor);
+    if (input.action === "prepare" || input.action === "ask") this.authorizeRequest(input, actor);
+    else if ("revision" in input) this.authorizeRevision(input, actor);
     else this.authorizePrivate(input, actor);
   }
+  authorizeRequest(input: Extract<Command, { action: "prepare" | "ask" }>, actor: Actor): void {
+    if (actor.kind === "guest") {
+      if (input.source || input.contact.handle !== actor.source.handle) throw new Error("A sender can only initiate their own authenticated request.");
+    } else assertOwner(actor);
+    if (this.records.contact(input.contact.handle)?.meetings.some(value => value.status === "do_not_contact")) throw new Error("Do not contact: the owner blocked this contact.");
+  }
+  async authorizeGroup(input: Command, actor: Extract<Actor, { kind: "owner" }>): Promise<void> {
+    const contact = await this.ports.groupContact(actor.source.thread);
+    if ("contact" in input && (input.source || input.contact.handle !== contact.handle)) throw new Error("Schedule only with this group's verified contact; other requests belong in the private owner conversation.");
+    if ("meetingId" in input && this.records.find(input.meetingId).contact.handle !== contact.handle) throw new Error("This meeting belongs to another contact. Continue privately.");
+  }
   authorizePrivate(input: Command, actor: Actor): void {
-    assertOwner(actor, true);
+    assertOwner(actor, !["move", "cancel", "reply"].includes(input.action));
+    if ("meetingId" in input) assertParticipant(actor, this.records.find(input.meetingId));
     if (input.action === "repair") this.pendingBooking(input.meetingId);
     if (input.action === "reply") {
       const value = this.records.find(input.meetingId);
@@ -87,7 +121,7 @@ export class Scheduling {
     const value = this.records.find(input.meetingId);
     switch (input.action) {
       case "approve": assertOwner(actor, true); break;
-      case "publish": if (actor.kind === "guest") assertParticipant(actor, value); else assertOwner(actor, true); break;
+      case "publish": assertParticipant(actor, value); break;
       case "choose": case "repropose": assertParticipant(actor, value); break;
     }
     if (input.action === "repropose" && value.status === "held" && value.proposal.revision === input.revision + 1 && value.proposed?.revision === input.revision) return;
@@ -111,11 +145,11 @@ export class Scheduling {
       }
       case "publish": return this.publish(input.meetingId, input.revision, actor);
       case "choose": return this.choose(input.meetingId, input.revision, input.option, actor);
-      case "repropose": return this.repropose(input.meetingId, input.revision, input.range, actor);
-      case "move": return this.move(input.meetingId, input.start, actor);
+      case "repropose": return this.repropose(input.meetingId, input.revision, input.range, actor, input.permissions);
+      case "move": return this.move(input.meetingId, input.start, actor, input.permissions);
       case "cancel": return this.cancel(input.meetingId, actor);
       case "reply": {
-        assertOwner(actor, true);
+        assertOwner(actor);
         const value = this.records.find(input.meetingId);
         if (!value.proposed || !["sent", "waiting_on_them", "confirmed"].includes(value.status)) throw new Error("Reply requires this contact's verified, authorized meeting conversation.");
         await this.sendReply(value.proposed.thread, actor.source, input.text);
@@ -145,9 +179,12 @@ export class Scheduling {
   }
   async evidence(input: { contact: { handle: string }; source?: { thread: string; messageId: string } }, actor: Actor): Promise<Source> {
     let verified: Source;
-    if (actor.kind === "guest" && !input.source) verified = actor.source;
-    else { assertOwner(actor, true); verified = input.source ? await this.ports.message(input.source.thread, input.source.messageId) : actor.source; }
+    if ((actor.kind === "guest") && !input.source) verified = actor.source;
+    else { assertOwner(actor, Boolean(input.source)); verified = input.source ? await this.ports.message(input.source.thread, input.source.messageId) : actor.source; }
     if (!verified.owner && verified.handle !== input.contact.handle) throw new RejectedEffect("The source contact does not match this scheduling request.");
+    const active = this.records.contact(input.contact.handle)?.meetings.find(value => ["new", "waiting_on_us", "held", "sent", "waiting_on_them"].includes(value.status));
+    if (active && !verified.owner && verified.thread !== (active.proposed?.thread ?? active.source.thread)) throw new RejectedEffect("This contact's active request belongs to another conversation; it cannot be redirected by a new source.");
+    if (active && actor.kind === "owner" && !actor.mainDm) assertParticipant(actor, active);
     return verified;
   }
   async intake(input: { contact: { name: string; handle: string }; source?: { thread: string; messageId: string } }, actor: Actor): Promise<Meeting> {
@@ -181,7 +218,7 @@ export class Scheduling {
     let info: Details;
     try { info = this.materialize(input.details, prefs); }
     catch (error) { if (error instanceof DecisionRequired) return this.question(value, error.message); throw error; }
-    try { return await this.hold(value, info, input.range, 1, []); }
+    try { return await this.hold(value, info, { range: input.range, revision: 1, excluded: [], permissions: input.permissions }); }
     catch (error) {
       if (error instanceof RejectedEffect) {
         const current = this.records.find(value.id);
@@ -201,11 +238,12 @@ export class Scheduling {
     this.records.save(next, `The private owner question was confirmed in inbox message ${receipt.messageId}.`);
     return next;
   }
-  async hold(value: Meeting, info: Details, range: Range, revision: number, excluded: string[]): Promise<Held> {
+  async hold(value: Meeting, info: Details, request: { range: Range; revision: number; excluded: string[]; permissions?: Permissions }): Promise<Held> {
+    const { range, revision, excluded, permissions: allowed = permissions.parse({}) } = request;
     const prefix = `${value.id}/r${revision}`;
     const prefs = this.preferences();
-    const planned = await this.records.effect(`${prefix}/availability`, { info, range, excluded }, availabilityPlan, {
-      run: async () => plan({ prefs, details: info, range, events: await this.ports.list(prefs.busyCalendars, range), now: this.now(), ignored: liveHolds(value), excluded }), retry: "safe",
+    const planned = await this.records.effect(`${prefix}/availability`, { info, range, excluded, allowed }, availabilityPlan, {
+      run: async () => plan({ prefs, details: info, range, events: await this.ports.list(prefs.busyCalendars, range), now: this.now(), ignored: [...liveHolds(value), ...allowed.conflicts], excluded, outsideHours: allowed.outsideHours }), retry: "safe",
     });
     for (const move of planned.moves) await this.movePriority(value, move, prefix);
     const options = planned.slots;
@@ -214,7 +252,7 @@ export class Scheduling {
     for (const [index, option] of options.entries()) {
       const current = this.records.find(value.id), busy = await this.ports.list(prefs.busyCalendars, range);
       const created = busy.filter(value => markers.has(value.marker) && this.records.operation(value.marker)).map(value => value.ref);
-      if (!insideHours(option, info, prefs, this.now()) || conflicts(option, info, busy, [...liveHolds(current), ...created]).length) {
+      if (!insideHours(option, info, prefs, this.now(), allowed.outsideHours) || conflicts(option, info, busy, [...liveHolds(current), ...created, ...allowed.conflicts]).length) {
         throw new RejectedEffect("The planned time changed before its holds were complete. Release partial holds and research new options privately.");
       }
       const [ref, ...travel] = await this.reserve({ meetingId: value.id, topic: info.topic, calendar: prefs.calendar, prefix: `${prefix}/s${index + 1}` }, windows(option, info));
@@ -224,7 +262,7 @@ export class Scheduling {
     const nextProposal = proposal.parse({ revision, slots: held, expiresAt: iso(this.now() + 48 * 3_600_000) });
     const createdKeys = new Set(held.flatMap(value => [value.meeting, ...value.travel]).map(refKey));
     const current = this.records.find(value.id);
-    const next = meeting.parse({ ...current, status: "held", details: info, range, nextRevision: revision + 1, proposal: nextProposal,
+    const next = meeting.parse({ ...current, status: "held", details: info, range, permissions: allowed, nextRevision: revision + 1, proposal: nextProposal,
       approval: current.origin === "external" ? "required" : "authorized", reserved: current.reserved.filter(ref => !createdKeys.has(refKey(ref))), updatedAt: iso(this.now()) });
     if (next.status !== "held") throw new Error("The verified proposal did not produce a held meeting.");
     this.records.save(next, `The calendar verified all three options for proposal ${revision}.`);
@@ -290,7 +328,7 @@ export class Scheduling {
   async verifyHolds(value: Held | Offered, slots: readonly Slot[] = value.proposal.slots): Promise<void> {
     const prefs = this.preferences();
     const busy = await this.ports.list(prefs.busyCalendars, value.range);
-    const ignored = liveHolds(value);
+    const ignored = [...liveHolds(value), ...value.permissions.conflicts];
     for (const option of slots) {
       const spans = windows(option, value.details);
       const ordinal = value.proposal.slots.findIndex(slot => refKey(slot.meeting) === refKey(option.meeting)) + 1;
@@ -301,13 +339,12 @@ export class Scheduling {
           || observed.marker !== `${value.id}/r${value.proposal.revision}/s${ordinal}/${expected.role}`
           || Date.parse(observed.start) !== Date.parse(expected.start) || Date.parse(observed.end) !== Date.parse(expected.end)) throw new Error("A recorded hold or travel block changed. Reconcile it before sending times.");
       }
-      if (!insideHours(option, value.details, prefs, this.now()) || conflicts(option, value.details, busy, ignored).length) throw new Error("An offered time is no longer available. Ask the owner privately to prepare replacements.");
+      if (!insideHours(option, value.details, prefs, this.now(), value.permissions.outsideHours) || conflicts(option, value.details, busy, ignored).length) throw new Error("An offered time is no longer available. Ask the owner privately to prepare replacements.");
     }
   }
   async publish(id: string, revision: number, actor: Actor): Promise<Meeting> {
     const value = this.records.find(id);
-    const thread = value.proposed?.thread ?? (value.origin === "external" && value.source.channel === "plow" ? value.source.thread : undefined);
-    if (thread && actor.kind === "guest") assertParticipant(actor, value); else assertOwner(actor, true);
+    const thread = await this.meetingThread(value, actor);
     if ((value.status === "sent" || value.status === "waiting_on_them" || value.status === "confirmed") && value.proposed?.revision === revision) return value;
     const held = this.held(id, revision, this.records.operation(`${id}/r${revision}/publish`) !== null);
     if (held.approval !== "authorized") throw new Error("The owner must privately approve this exact proposal before times go out.");
@@ -326,6 +363,13 @@ export class Scheduling {
     const next = meeting.parse({ ...current, status: "sent", proposed: { ...receipt, revision, slots: current.proposal.slots }, updatedAt: receipt.at });
     this.records.save(next, `The inbox verified proposal ${revision}, message ${receipt.messageId}. Actual text: ${receipt.text}`);
     return this.cleanup(id);
+  }
+  async meetingThread(value: Meeting, actor: Actor): Promise<string | undefined> {
+    const thread = value.proposed?.thread ?? (value.source.channel === "plow" && value.source.thread !== await this.ports.ownerThread() ? value.source.thread : undefined);
+    if (!thread) { assertOwner(actor, true); return; }
+    assertParticipant(actor, value);
+    if ((await this.ports.groupContact(thread)).handle !== value.contact.handle) throw new Error("The group roster no longer matches this contact. Continue privately.");
+    return thread;
   }
   offered(id: string, revision: number, actor: Actor, recovering = false): Offered {
     const value = this.records.find(id);
@@ -425,10 +469,10 @@ export class Scheduling {
     }
     return value;
   }
-  async repropose(id: string, revision: number, range: Range, actor: Actor): Promise<Meeting> {
+  async repropose(id: string, revision: number, range: Range, actor: Actor, allowed?: Permissions): Promise<Meeting> {
     const current = this.records.find(id);
     if (current.status === "held" && current.proposal.revision === revision + 1) { assertParticipant(actor, current); return current; }
-    const snapshot = await this.records.effect(`${id}/r${revision}/replacement-plan`, { range }, meeting, { run: async () => this.offered(id, revision, actor), retry: "safe" });
+    const snapshot = await this.records.effect(`${id}/r${revision}/replacement-plan`, { range, allowed }, meeting, { run: async () => this.offered(id, revision, actor), retry: "safe" });
     if (snapshot.status !== "sent" && snapshot.status !== "waiting_on_them") throw new Error("The replacement plan has no verified sent proposal.");
     assertParticipant(actor, snapshot);
     const value = snapshot;
@@ -437,24 +481,26 @@ export class Scheduling {
       this.records.save(retired, `Inbox message ${actor.kind === "maintenance" ? "" : actor.source.messageId} requested new options for proposal ${revision}.`);
     }
     await this.cleanup(id);
-    const next = await this.hold(this.records.find(id), value.details, range, value.nextRevision, value.proposal.slots.map(slot => slot.start));
-    return next.approval === "authorized" && actor.kind === "owner" && actor.mainDm ? this.publish(id, next.proposal.revision, actor) : next;
+    const next = await this.hold(this.records.find(id), value.details, { range, revision: value.nextRevision, excluded: value.proposal.slots.map(slot => slot.start), permissions: allowed });
+    return next.approval === "authorized" && actor.kind === "owner" ? this.publish(id, next.proposal.revision, actor) : next;
   }
-  async move(id: string, start: string, actor: Actor): Promise<Meeting> {
-    assertOwner(actor, true);
+  async move(id: string, start: string, actor: Actor, allowed: Permissions = permissions.parse({})): Promise<Meeting> {
+    assertOwner(actor);
     const value = this.records.find(id);
+    assertParticipant(actor, value);
     if (value.status !== "confirmed") throw new Error("Only a verified booked meeting can be moved.");
     if (Date.parse(value.invitation.event.start) === Date.parse(start)) return this.finishMove(value);
-    const prefs = this.preferences(), candidate = { start, durationMin: value.details.durationMin };
-    const spans = windows(candidate, value.details), range = { from: spans.map(span => span.start).sort()[0] ?? start, to: spans.map(span => span.end).sort().at(-1) ?? endOf(candidate) };
+    const marker = `${id}/move/${hash(start)}`, prefs = this.preferences();
+    const info = value.details;
+    const candidate = { start, durationMin: info.durationMin };
+    const spans = windows(candidate, info), range = { from: spans.map(span => span.start).sort()[0] ?? start, to: spans.map(span => span.end).sort().at(-1) ?? endOf(candidate) };
     const busy = await this.ports.list(prefs.busyCalendars, range);
-    if (!insideHours(candidate, value.details, prefs, this.now()) || conflicts(candidate, value.details, busy, [value.invitation.event.ref, ...liveHolds(value)]).length) throw new Error("The new time is not available. Ask the owner privately to resolve the conflict.");
-    const marker = `${id}/move/${hash(start)}`;
+    if (!insideHours(candidate, info, prefs, this.now(), allowed.outsideHours) || conflicts(candidate, info, busy, [value.invitation.event.ref, ...liveHolds(value), ...allowed.conflicts]).length) throw new Error("The new time is not available. Ask the owner privately to resolve the conflict.");
     const travel = await this.reserve({ meetingId: id, topic: value.details.topic, calendar: value.invitation.event.ref.calendar, prefix: marker }, spans.filter(span => span.role !== "meeting"));
-    const booked = await this.book(value, { ...candidate, meeting: value.invitation.event.ref, travel }, marker, value);
+    const booked = await this.book({ ...value, details: info }, { ...candidate, meeting: value.invitation.event.ref, travel }, marker, value);
     const keys = new Set(travel.map(refKey));
     const current = this.records.find(id);
-    const next = meeting.parse({ ...current, status: "confirmed", invitation: booked, reserved: current.reserved.filter(ref => !keys.has(refKey(ref))), cleanup: [...current.cleanup, ...value.invitation.travel], updatedAt: iso(this.now()) });
+    const next = meeting.parse({ ...current, status: "confirmed", details: info, permissions: allowed, invitation: booked, reserved: current.reserved.filter(ref => !keys.has(refKey(ref))), cleanup: [...current.cleanup, ...value.invitation.travel], updatedAt: iso(this.now()) });
     this.records.save(next, `The calendar verified the moved invitation ${booked.event.ref.id} with its saved video link.`);
     if (next.status !== "confirmed") throw new Error("The moved invitation was not verified.");
     return this.finishMove(next);
@@ -465,8 +511,9 @@ export class Scheduling {
     return cleaned;
   }
   async cancel(id: string, actor: Actor, notify = true): Promise<Meeting> {
-    assertOwner(actor, true);
+    assertOwner(actor);
     let value = this.records.find(id);
+    assertParticipant(actor, value);
     if (value.status === "do_not_contact") return this.cleanup(id);
     if (value.status === "confirmed") {
       const ref = value.invitation.event.ref;
@@ -483,6 +530,7 @@ export class Scheduling {
   async publicNotice(value: Meeting, reason: string, facts: unknown): Promise<void> {
     if (!value.proposed || value.status === "do_not_contact") return;
     const thread = value.proposed.thread, key = `${value.id}/${reason}-notice`;
+    if ((await this.ports.groupContact(thread)).handle !== value.contact.handle) throw new Error("The meeting conversation no longer has its verified contact; resolve it privately.");
     const text = await this.draft(key, { audience: "guest", recipient: value.contact.name, contact: value.contact.name, facts, conversation: value.proposed.text, owner: this.preferences().ownerName,
       invitation: value.status === "confirmed" ? { start: value.invitation.event.start, end: value.invitation.event.end,
         timezone: value.details.timezone, attendees: value.invitation.event.attendees,
@@ -495,10 +543,10 @@ export class Scheduling {
       await this.records.effect(`${key}-log`, {}, z.boolean(), { run: async () => true, retry: "safe" });
     }
   }
-  async privateNotice(value: Meeting, reason: string, facts: unknown): Promise<z.infer<typeof delivery>> {
+  async privateNotice(value: Meeting, reason: string, facts: unknown, request: Source = value.source): Promise<z.infer<typeof delivery>> {
     const thread = await this.ports.ownerThread();
-    const key = `${value.id}/notice/${reason}`, text = await this.draft(key, { audience: "private owner", owner: this.records.owner()?.ownerName, contact: value.contact.name, conversation: this.records.ownerSource(thread)?.text,
-      request: { origin: value.origin }, facts });
+    const key = `${value.id}/notice/${reason}`, text = await this.draft(key, { audience: "private owner", owner: this.records.owner()?.ownerName, contact: value.contact.name,
+      languageSample: this.records.ownerSource(thread)?.text, request: { origin: request.owner ? "owner" : "external", message: request.text }, facts });
     return this.records.effect(key, { thread, text }, delivery, { run: () => this.ports.send(thread, text),
       recover: () => this.ports.recoverSend(thread, text, value.createdAt) });
   }
@@ -526,7 +574,7 @@ export class Scheduling {
     const facts = { purpose: "Explain this scheduling blocker privately and the next step. Never claim the pending actions succeeded.", failures: [...new Set(failures)] };
     const thread = await this.ports.ownerThread();
     const key = `monitor:${hash(facts)}`, text = await this.draft(key, { audience: "private owner", owner: this.records.owner()?.ownerName,
-      conversation: this.records.ownerSource(thread)?.text, facts });
+      languageSample: this.records.ownerSource(thread)?.text, facts });
     await this.records.effect(key, { thread, text }, delivery, {
       run: () => this.ports.send(thread, text), recover: () => this.ports.recoverSend(thread, text, new Date(0).toISOString()),
     });
@@ -548,7 +596,8 @@ export class Scheduling {
   }
   async resumeTask(raw: unknown): Promise<void> {
     const saved = task.parse(raw);
-    if (saved.authority.source.channel !== "plow") { this.records.reject(`task:${hash(saved)}`); return; }
+    const actor = this.restoredActor(saved.authority);
+    if (!actor) { this.records.reject(`task:${hash(saved)}`); return; }
     if ("meetingId" in saved.command) {
       const current = this.records.find(saved.command.meetingId);
       if (current.status === "do_not_contact" || (current.status === "passed" && saved.command.action !== "cancel")) { this.records.reject(`task:${hash(saved)}`); return; }
@@ -560,10 +609,13 @@ export class Scheduling {
         closedStatuses.has(value.status) && value.source.thread === evidence.thread && value.source.messageId === evidence.messageId);
       if (closed) { this.records.reject(`task:${hash(saved)}`); return; }
     }
-    const actor: Actor = saved.authority.kind === "guest" ? { kind: "guest", source: saved.authority.source }
-      : { kind: "owner", source: saved.authority.source, mainDm: saved.authority.mainDm, hostContext: {} };
     try { await this.execute(saved.command, actor); }
     catch (error) { if (error instanceof RejectedEffect) this.records.reject(`task:${hash(saved)}`); else throw error; }
+  }
+  restoredActor(authority: z.infer<typeof task>["authority"]): Actor | null {
+    if (authority.source.channel !== "plow") return null;
+    return authority.kind === "guest" ? { kind: "guest", source: authority.source }
+      : { kind: "owner", source: authority.source, mainDm: authority.mainDm, hostContext: {} };
   }
   async reviewMeeting(value: Meeting): Promise<void> {
     if ("proposal" in value && Date.parse(value.proposal.expiresAt) <= this.now()
